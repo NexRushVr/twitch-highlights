@@ -8,7 +8,9 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [1.0.0] - 2026-05-12
 
-Initial public release.
+Initial public release. A local CLI that turns Twitch / Kick / m3u8 VODs into
+short, captioned highlight clips using Whisper transcription and an LLM
+(Ollama by default) for moment selection — no cloud APIs, no per-clip cost.
 
 ### Added
 - End-to-end VOD highlight pipeline: source resolve → audio extract →

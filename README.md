@@ -4,8 +4,6 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-> **Disclaimer:** Generated with agentic AI.
-
 Local, GPU-accelerated highlight extractor for Twitch / Kick VODs and raw m3u8 streams.
 
 **What you get:** vertical, CapCut-style captioned short clips (`*_captioned.mp4`) plus the horizontal source cuts, ready to upload to TikTok / Shorts / Reels. Everything runs on your own machine — no cloud APIs required if you use Ollama.
@@ -14,19 +12,40 @@ Local, GPU-accelerated highlight extractor for Twitch / Kick VODs and raw m3u8 s
 
 **Cost:** free (MIT). The only paid path is optional OpenAI usage; the default (`ollama` + a local Whisper model) costs $0 once installed.
 
-Given a streamer or a VOD URL, this pipeline:
+**This is not:** a hosted service, a Twitch clip uploader, or a one-click TikTok publisher. It produces files locally — what you do with them is up to you.
 
-1. Pulls the latest VOD (yt-dlp for Twitch, vodvod.top scraper, Kick API, or a direct m3u8).
-2. Extracts 16 kHz mono audio with ffmpeg.
-3. Transcribes it with Whisper (CUDA).
-4. Asks an LLM (Ollama locally, or OpenAI) to pick the best short-form clip moments.
-5. Cross-references those picks against audio-loudness peaks.
-6. Cuts the clips with ffmpeg.
-7. Burns in CapCut-style captions.
+## Quickstart
 
-Everything is cached per VOD-date, so re-running the same day is a fast no-op.
+Assumes Python 3.10+, ffmpeg on `PATH`, an NVIDIA GPU (CPU works but is much slower), and Ollama running locally. Detailed install + GPU notes are in the [Install](#install) section.
 
----
+```bash
+git clone https://github.com/NexRushVr/twitch-highlights.git
+cd twitch-highlights
+python -m venv .venv && . .venv/Scripts/Activate.ps1     # macOS/Linux: source .venv/bin/activate
+pip install -r requirements.txt
+playwright install chromium
+ollama pull qwen2.5:14b
+
+# Cut highlights from a Twitch VOD:
+python pipeline.py --source-type twitch --url https://www.twitch.tv/videos/<VOD_ID>
+```
+
+Output lands in `clips/<streamer>/<vod_date>/`. Re-running on the same VOD is a fast no-op — every step is cached per VOD-date.
+
+## How it works
+
+```
+pipeline.py
+├── modules/source_resolver.py    # yt-dlp, vodvod.top scrape, Kick API, m3u8 download
+├── modules/audio_extractor.py    # ffmpeg WAV + librosa loudness peaks
+├── modules/transcriber.py        # openai-whisper (CUDA)
+├── modules/highlight_selector.py # LLM call + JSON parse + dedupe
+├── modules/clip_extractor.py     # ffmpeg clip cutting
+└── modules/subtitle_burner.py    # ASS generation + ffmpeg subtitle burn-in
+prompts/                          # base + per-mode LLM prompts (edit freely)
+```
+
+The pipeline pulls the source VOD, transcribes the audio with Whisper, asks an LLM to pick the best clip windows from the transcript, cross-references those picks against audio-loudness peaks, cuts with ffmpeg, and burns CapCut-style captions on top.
 
 ## Requirements
 
@@ -77,7 +96,7 @@ pip install -r requirements.txt
 playwright install chromium      # only needed for the vodvod.top scraper
 ```
 
-### Whisper + GPU note
+### GPU and Whisper setup
 
 `pip install openai-whisper` pulls in `torch` from PyPI, which on Windows/Linux installs the **CPU-only** wheel by default. To actually use your NVIDIA GPU you need a CUDA-enabled torch build. Install it *before* the rest:
 
@@ -107,12 +126,10 @@ ffmpeg -version            # ffmpeg on PATH
 yt-dlp --version           # yt-dlp on PATH
 ollama list                # Ollama running, default model present (start the daemon first if this errors)
 python -c "import whisper, torch; print('cuda:', torch.cuda.is_available())"
-pip install -r requirements-dev.txt && pytest -q   # unit tests (no GPU/network needed)
+pip install -r requirements-dev.txt && pytest -q   # 132 unit tests (no GPU/network needed)
 ```
 
-If `torch.cuda.is_available()` prints `False`, see the GPU note above. If
-`ollama list` errors with a connection refused, start the daemon
-(`ollama serve` or launch the tray app) and retry.
+If `torch.cuda.is_available()` prints `False`, see the GPU section above. If `ollama list` errors with a connection refused, start the daemon (`ollama serve` or launch the tray app) and retry.
 
 ## Usage
 
@@ -188,34 +205,42 @@ python pipeline.py --config config.json
 
 Env-var example: `VOD_CLIP_OLLAMA_MODEL=llama3.1:8b`, `VOD_CLIP_WHISPER_DEVICE=cpu`.
 
-Key settings:
+### Common settings
 
 | Key | Default | Notes |
 | --- | --- | --- |
 | `source_type` | `twitch` | `twitch` \| `vodvod` \| `kick` \| `m3u8` |
+| `clip_mode` | `reaction` | `reaction` \| `dance` \| `hype` \| `all` |
+| `max_clips` | `10` | hard cap on output count |
+| `whisper_device` | `cuda` | **`cuda` will crash on a CPU-only machine — set `cpu` explicitly if no GPU** |
+| `whisper_model` | `large-v3` | `tiny` \| `base` \| `small` \| `medium` \| `large-v3` |
+| `llm_backend` | `ollama` | `ollama` \| `openai` |
+| `ollama_model` | `qwen2.5:14b` | any model pulled into your local Ollama |
+| `burn_subtitles` | `true` | also produce a `*_captioned.mp4` per clip |
+
+<details>
+<summary><b>Advanced settings</b></summary>
+
+| Key | Default | Notes |
+| --- | --- | --- |
 | `twitch_vod_url` | `""` | used when `source_type=twitch` |
 | `vodvod_channel` | `""` | e.g. `@shroud` |
 | `kick_channel` | `""` | slug, no `@` |
 | `m3u8_url` | `""` | direct stream URL |
 | `quality` | `720p` | yt-dlp height cap: `best` \| `1080p` \| `720p` \| `480p` |
 | `download_dir` | `./downloads` | source VOD + extracted WAV cache |
-| `whisper_model` | `large-v3` | `tiny` \| `base` \| `small` \| `medium` \| `large-v3` |
-| `whisper_device` | `cuda` | **`cuda` will crash on a CPU-only machine — set `cpu` explicitly if no GPU** |
 | `whisper_language` | `en` | Whisper language hint |
-| `llm_backend` | `ollama` | `ollama` \| `openai` |
-| `ollama_model` | `qwen2.5:14b` | any model pulled into your local Ollama |
 | `openai_model` | `gpt-4o-mini` | used when `llm_backend=openai` |
 | `openai_api_key` | `""` | or set `VOD_CLIP_OPENAI_API_KEY` |
 | `llm_timeout_seconds` | `300` | per-chunk timeout — guards against hung reasoning models |
-| `clip_mode` | `reaction` | `reaction` \| `dance` \| `hype` \| `all` |
-| `max_clips` | `10` | hard cap on output count |
 | `min_clip_duration` | `8` | seconds |
 | `max_clip_duration` | `45` | seconds |
 | `clip_padding_seconds` | `3` | head/tail padding around the LLM's chosen window |
 | `output_dir` | `./clips` | where `<streamer>/<vod_date>/` lands |
-| `burn_subtitles` | `true` | also produce a `*_captioned.mp4` per clip |
 
-## Nightly scheduling (Windows)
+</details>
+
+## Nightly scheduling
 
 Copy `nightly.example.ps1` to `nightly.ps1`, edit the channel lists, then register a daily Task Scheduler job (the example file has the `schtasks` command). `nightly.ps1` is gitignored.
 
@@ -225,7 +250,7 @@ On macOS / Linux, the equivalent is a `cron` entry pointing at `python pipeline.
 
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
-| `RuntimeError: CUDA error` / `Torch not compiled with CUDA` | torch CPU wheel installed, or no GPU | Install CUDA torch (see install section), or set `whisper_device: "cpu"`. |
+| `RuntimeError: CUDA error` / `Torch not compiled with CUDA` | torch CPU wheel installed, or no GPU | Install CUDA torch (see GPU and Whisper setup), or set `whisper_device: "cpu"`. |
 | `whisper.load_model` OOM on GPU | `large-v3` needs ~10 GB VRAM | Use `whisper_model: "medium"` or `"small"`. |
 | `httpx.ConnectError` / `connection refused` to `localhost:11434` | Ollama daemon not running | Launch the Ollama tray app, or run `ollama serve`. |
 | `model "qwen2.5:14b" not found` | Default model not pulled | `ollama pull qwen2.5:14b` (or whatever you set as `ollama_model`). |
@@ -251,27 +276,9 @@ This project depends on third-party services that change without warning. The sc
 - **VOD content belongs to the streamer.** Get explicit permission before reuploading clips of someone else's stream to TikTok / YouTube / Reels / etc. Many streamers explicitly allow clipping; others don't. The default assumption should be "ask first." This tool is intended for personal archival and for clippers working with streamers who've okayed it.
 - **The MIT license covers the code, not the content you run it on.** You are responsible for what you do with the output.
 
-## Tests
+---
 
-```bash
-pip install -r requirements-dev.txt
-pytest
-```
-
-The tests stub out ffmpeg, Whisper, and the LLM call, so they don't need a GPU or network. CI runs on Python 3.10 / 3.11 / 3.12 on every push (see `.github/workflows/tests.yml`).
-
-## Architecture
-
-```
-pipeline.py
-├── modules/source_resolver.py   # yt-dlp, vodvod.top scrape, Kick API, m3u8 download
-├── modules/audio_extractor.py   # ffmpeg WAV + librosa loudness peaks
-├── modules/transcriber.py       # openai-whisper (CUDA)
-├── modules/highlight_selector.py# LLM call + JSON parse + dedupe
-├── modules/clip_extractor.py    # ffmpeg clip cutting
-└── modules/subtitle_burner.py   # ASS generation + ffmpeg subtitle burn-in
-prompts/                         # base + per-mode LLM prompts (edit freely)
-```
+*Disclaimer: Generated with agentic AI.*
 
 ## License
 
