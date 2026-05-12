@@ -26,11 +26,16 @@ pip install -r requirements.txt
 playwright install chromium
 ollama pull qwen2.5:14b
 
-# Cut highlights from a Twitch VOD:
-python pipeline.py --source-type twitch --url https://www.twitch.tv/videos/<VOD_ID>
+# Cut highlights from the most recent Kick stream by a channel:
+python pipeline.py --source-type kick --channel abehamm --clip-mode all
+
+# Or via vodvod.top (Twitch mirror), for Twitch streamers who archive there:
+python pipeline.py --source-type vodvod --channel "@eevi" --clip-mode all
 ```
 
 Output lands in `clips/<streamer>/<vod_date>/`. Re-running on the same VOD is a fast no-op — every step is cached per VOD-date.
+
+> **Picking a source type:** Use `twitch` when you have a still-live VOD URL — perfect for clipping your own streams. Use `kick` for any Kick channel. Use `vodvod` for older Twitch streams whose original VODs have expired (Twitch only retains them 14–60 days depending on the streamer's tier).
 
 ## How it works
 
@@ -134,17 +139,18 @@ If `torch.cuda.is_available()` prints `False`, see the GPU section above. If `ol
 ## Usage
 
 ```bash
+# Latest VOD from a Kick channel — Kick keeps VODs indefinitely, so this is
+# the most reliable source for channels that stream on Kick.
+python pipeline.py --source-type kick --channel abehamm --clip-mode all --max-clips 10
+
 # Latest VOD from a vodvod.top channel (Twitch mirror).
-# Replace @your_channel with a real Twitch handle, e.g. @shroud.
-python pipeline.py --source-type vodvod --channel "@shroud" --clip-mode all --max-clips 10
+# Useful for Twitch streamers whose own VODs have expired or weren't archived.
+python pipeline.py --source-type vodvod --channel "@eevi" --clip-mode all --max-clips 10
 
-# Latest VOD from a Kick channel
-python pipeline.py --source-type kick --channel your_channel --clip-mode all
-
-# A specific Twitch VOD URL
+# A specific Twitch VOD URL — best path for your own streams or any still-live VOD.
 python pipeline.py --source-type twitch --url https://www.twitch.tv/videos/123456789
 
-# A raw m3u8 stream
+# A raw m3u8 stream — for when you already have a manifest URL in hand.
 python pipeline.py --source-type m3u8 --url https://example.com/stream.m3u8
 ```
 
@@ -265,7 +271,7 @@ If the run dies, check `pipeline_run.log` next to `pipeline.py` for the full tra
 
 This project depends on third-party services that change without warning. The scrapers in [modules/source_resolver.py](modules/source_resolver.py) are best-effort:
 
-- **vodvod.top** is an unaffiliated, community-run Twitch mirror. Its legal standing is unclear, the site itself could disappear, and the DOM is scraped via Playwright — any layout change breaks the `vodvod` source until [modules/source_resolver.py:68](modules/source_resolver.py#L68) is updated. **Prefer the `twitch` source (yt-dlp direct) when you have an official VOD URL** — it's the most stable path.
+- **vodvod.top** is an unaffiliated, community-run Twitch mirror. Its legal standing is unclear, the site itself could disappear, and the DOM is scraped via Playwright — any layout change breaks the `vodvod` source until [modules/source_resolver.py:68](modules/source_resolver.py#L68) is updated. The `twitch` direct path (yt-dlp) is the most stable when you have a live VOD URL — Twitch's 14–60 day retention just means you can't reach back to old streams that way.
 - **Kick.com** has no official public API. The `kick` source uses an undocumented endpoint fronted by Cloudflare and accessed via `curl_cffi` browser impersonation. It can rotate or rate-limit at any time.
 - **yt-dlp** ships extractor fixes constantly — keep it updated (`pip install -U yt-dlp`).
 - This project does not host, redistribute, or mirror anyone's stream content. It only orchestrates tools you've installed locally. If a streamer or platform asks you to stop processing their content, stop.
