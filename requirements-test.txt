@@ -6,5 +6,5 @@
 # stack just to run pytest. Saves ~750 MB and several minutes per CI job.
 #
 # To do real end-to-end development, install requirements-dev.txt instead.
-pytest>=7.0
-numpy>=1.24,<3.0
+pytest>=9.0.3
+numpy>=2.2.6,<3.0
