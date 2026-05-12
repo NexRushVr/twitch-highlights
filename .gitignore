@@ -1,0 +1,30 @@
+# Local data
+downloads/
+clips/
+logs/
+*.info.json
+pipeline_run.log
+
+# Local user config + nightly scheduler
+config.json
+nightly.ps1
+USAGE_EXAMPLE.md
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# Environments / secrets
+.env
+.venv/
+venv/
+
+# IDE / tooling
+.vscode/
+.idea/
+.claude/

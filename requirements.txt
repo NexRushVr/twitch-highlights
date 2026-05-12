@@ -1,0 +1,11 @@
+# Runtime deps. Pinned to minimum versions known to work with the current code.
+# For a fully reproducible install, pip-freeze your venv into requirements.lock
+# after a successful pip install -r requirements.txt and commit it locally.
+openai-whisper>=20231117
+yt-dlp>=2024.4.9
+librosa>=0.10,<0.12
+numpy>=1.24,<3.0
+playwright>=1.40,<2.0
+curl_cffi>=0.10,<0.15
+ollama>=0.4,<1.0
+openai>=1.30,<3.0

@@ -1,0 +1,29 @@
+{
+  "source_type": "vodvod",
+  "twitch_vod_url": "",
+  "vodvod_channel": "@your_channel",
+  "kick_channel": "",
+  "m3u8_url": "",
+
+  "quality": "720p",
+  "download_dir": "./downloads",
+
+  "whisper_model": "large-v3",
+  "whisper_device": "cuda",
+  "whisper_language": "en",
+
+  "llm_backend": "ollama",
+  "ollama_model": "qwen2.5:14b",
+  "openai_model": "gpt-4o-mini",
+  "openai_api_key": "",
+  "llm_timeout_seconds": 300,
+
+  "clip_mode": "all",
+  "max_clips": 10,
+  "min_clip_duration": 8,
+  "max_clip_duration": 45,
+  "clip_padding_seconds": 3,
+
+  "output_dir": "./clips",
+  "burn_subtitles": true
+}

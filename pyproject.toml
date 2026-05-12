@@ -1,0 +1,45 @@
+[project]
+name = "twitch-highlights"
+version = "1.0.0"
+description = "Local, GPU-accelerated highlight extractor for Twitch / Kick VODs and m3u8 streams."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Michael Mumma" }]
+keywords = ["twitch", "kick", "vod", "highlights", "whisper", "ollama", "ffmpeg"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Video",
+]
+dependencies = [
+    "openai-whisper>=20231117",
+    "yt-dlp>=2024.4.9",
+    "librosa>=0.10,<0.12",
+    "numpy>=1.24,<3.0",
+    "playwright>=1.40,<2.0",
+    "curl_cffi>=0.10,<0.15",
+    "ollama>=0.4,<1.0",
+    "openai>=1.30,<3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-mock>=3.10",
+]
+
+[project.urls]
+Homepage = "https://github.com/NexRushVr/twitch-highlights"
+Issues = "https://github.com/NexRushVr/twitch-highlights/issues"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

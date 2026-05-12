@@ -1,0 +1,10 @@
+# Minimal install for running the unit-test suite.
+#
+# The tests mock every external boundary (subprocess, librosa, whisper, ollama,
+# openai, playwright, curl_cffi) and the runtime modules guard those imports
+# with try/except ImportError → None, so CI does not need the heavy runtime
+# stack just to run pytest. Saves ~750 MB and several minutes per CI job.
+#
+# To do real end-to-end development, install requirements-dev.txt instead.
+pytest>=7.0
+numpy>=1.24,<3.0
