@@ -147,8 +147,10 @@ python pipeline.py --source-type kick --channel abehamm --clip-mode all --max-cl
 # Useful for Twitch streamers whose own VODs have expired or weren't archived.
 python pipeline.py --source-type vodvod --channel "@eevi" --clip-mode all --max-clips 10
 
-# A specific Twitch VOD URL — best path for your own streams or any still-live VOD.
-python pipeline.py --source-type twitch --url https://www.twitch.tv/videos/123456789
+# A specific Twitch VOD URL — best path for your own streams, or for popular
+# streamers (e.g. shroud) whose VODs stay available longer. Won't help with
+# channels like eevi who delete their VODs — use the vodvod path for those.
+python pipeline.py --source-type twitch --url https://www.twitch.tv/videos/2345678901
 
 # A raw m3u8 stream — for when you already have a manifest URL in hand.
 python pipeline.py --source-type m3u8 --url https://example.com/stream.m3u8
