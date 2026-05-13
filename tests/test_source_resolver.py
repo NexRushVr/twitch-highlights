@@ -6,11 +6,13 @@ from unittest.mock import MagicMock, patch, call
 import pytest
 
 from modules.source_resolver import (
+    apply_time_window,
     download_twitch_vod,
     get_latest_vodvod_m3u8,
     get_latest_kick_vod_m3u8,
     resolve_local_file,
     stream_m3u8_to_file,
+    _parse_time_string,
 )
 
 
@@ -371,3 +373,159 @@ def test_resolve_local_file_uses_mtime_for_vod_date(tmp_path):
         _, date = resolve_local_file(str(src), str(tmp_path / "dl"))
 
     assert date == "2026-01-15"
+
+
+# ---------------------------------------------------------------------------
+# _parse_time_string
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("s,expected", [
+    ("0", 0.0),
+    ("30", 30.0),
+    ("3600", 3600.0),
+    ("30:00", 1800.0),
+    ("1:30", 90.0),
+    ("1:00:00", 3600.0),
+    ("1:30:00", 5400.0),
+    ("0:00:01.5", 1.5),
+    ("  1:00:00  ", 3600.0),
+])
+def test_parse_time_string_valid(s, expected):
+    assert _parse_time_string(s) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("s", [
+    "",
+    "abc",
+    "1:bad:00",
+    "1:2:3:4",       # too many components
+    "-1",            # negative bare seconds
+    "1:-30:00",      # negative component
+])
+def test_parse_time_string_invalid(s):
+    with pytest.raises(ValueError):
+        _parse_time_string(s)
+
+
+# ---------------------------------------------------------------------------
+# apply_time_window
+# ---------------------------------------------------------------------------
+
+def _mock_probe_then_trim(duration: float):
+    """Mock subprocess.run so the first call (ffprobe) returns `duration` and
+    subsequent calls (ffmpeg trim) succeed silently."""
+    def side_effect(cmd, *a, **kw):
+        if cmd[0] == "ffprobe":
+            return MagicMock(returncode=0, stdout=f"{duration}\n")
+        return MagicMock(returncode=0)
+    return side_effect
+
+
+def test_apply_time_window_returns_input_when_both_bounds_empty(tmp_path):
+    src = tmp_path / "v.mp4"
+    src.write_bytes(b"data")
+    with patch("modules.source_resolver.subprocess.run") as mock_run:
+        out = apply_time_window(str(src), None, None, str(tmp_path / "dl"))
+    mock_run.assert_not_called()
+    assert out == str(src)
+
+
+def test_apply_time_window_trims_to_both_bounds(tmp_path):
+    src = tmp_path / "vod.mp4"
+    src.write_bytes(b"data")
+    download_dir = tmp_path / "dl"
+
+    with patch("modules.source_resolver.subprocess.run", side_effect=_mock_probe_then_trim(7200.0)) as mock_run:
+        out = apply_time_window(str(src), "1:00:00", "1:30:00", str(download_dir))
+
+    # 1st call = ffprobe, 2nd = ffmpeg trim
+    assert mock_run.call_count == 2
+    trim_cmd = mock_run.call_args_list[1][0][0]
+    assert trim_cmd[0] == "ffmpeg"
+    assert trim_cmd[trim_cmd.index("-ss") + 1] == "3600.0"
+    assert trim_cmd[trim_cmd.index("-t") + 1] == "1800.0"
+    assert "-c" in trim_cmd and "copy" in trim_cmd  # stream-copy
+    assert out.endswith("vod_w3600-5400.mp4")
+    assert str(download_dir) in out
+
+
+def test_apply_time_window_only_start_trims_to_end(tmp_path):
+    src = tmp_path / "vod.mp4"
+    src.write_bytes(b"data")
+
+    with patch("modules.source_resolver.subprocess.run", side_effect=_mock_probe_then_trim(3600.0)) as mock_run:
+        out = apply_time_window(str(src), "0:30:00", None, str(tmp_path / "dl"))
+
+    trim_cmd = mock_run.call_args_list[1][0][0]
+    assert trim_cmd[trim_cmd.index("-ss") + 1] == "1800.0"
+    assert trim_cmd[trim_cmd.index("-t") + 1] == "1800.0"  # 3600 - 1800 = 1800
+    assert out.endswith("vod_w1800-3600.mp4")
+
+
+def test_apply_time_window_only_end_trims_from_zero(tmp_path):
+    src = tmp_path / "vod.mp4"
+    src.write_bytes(b"data")
+
+    with patch("modules.source_resolver.subprocess.run", side_effect=_mock_probe_then_trim(3600.0)) as mock_run:
+        out = apply_time_window(str(src), None, "0:10:00", str(tmp_path / "dl"))
+
+    trim_cmd = mock_run.call_args_list[1][0][0]
+    assert trim_cmd[trim_cmd.index("-ss") + 1] == "0.0"
+    assert trim_cmd[trim_cmd.index("-t") + 1] == "600.0"
+    assert out.endswith("vod_w0-600.mp4")
+
+
+def test_apply_time_window_skips_trim_when_cached(tmp_path):
+    src = tmp_path / "vod.mp4"
+    src.write_bytes(b"data")
+    download_dir = tmp_path / "dl"
+    download_dir.mkdir()
+    cached = download_dir / "vod_w0-600.mp4"
+    cached.write_bytes(b"cached")
+
+    with patch("modules.source_resolver.subprocess.run", side_effect=_mock_probe_then_trim(3600.0)) as mock_run:
+        out = apply_time_window(str(src), None, "0:10:00", str(download_dir))
+
+    # ffprobe still runs to validate bounds, but ffmpeg trim is skipped.
+    assert mock_run.call_count == 1
+    assert mock_run.call_args_list[0][0][0][0] == "ffprobe"
+    assert out == str(cached)
+
+
+def test_apply_time_window_rejects_start_past_video_end(tmp_path):
+    src = tmp_path / "vod.mp4"
+    src.write_bytes(b"data")
+
+    with patch("modules.source_resolver.subprocess.run", side_effect=_mock_probe_then_trim(1800.0)):
+        with pytest.raises(ValueError, match="start_time .* past the video's end"):
+            apply_time_window(str(src), "2:00:00", None, str(tmp_path / "dl"))
+
+
+def test_apply_time_window_rejects_end_past_video_duration(tmp_path):
+    src = tmp_path / "vod.mp4"
+    src.write_bytes(b"data")
+
+    with patch("modules.source_resolver.subprocess.run", side_effect=_mock_probe_then_trim(1800.0)):
+        with pytest.raises(ValueError, match="end_time .* exceeds video duration"):
+            apply_time_window(str(src), None, "1:00:00", str(tmp_path / "dl"))
+
+
+def test_apply_time_window_rejects_inverted_bounds(tmp_path):
+    src = tmp_path / "vod.mp4"
+    src.write_bytes(b"data")
+
+    with patch("modules.source_resolver.subprocess.run", side_effect=_mock_probe_then_trim(7200.0)):
+        with pytest.raises(ValueError, match="must be after"):
+            apply_time_window(str(src), "1:30:00", "1:00:00", str(tmp_path / "dl"))
+
+
+def test_apply_time_window_accepts_bare_seconds(tmp_path):
+    src = tmp_path / "vod.mp4"
+    src.write_bytes(b"data")
+
+    with patch("modules.source_resolver.subprocess.run", side_effect=_mock_probe_then_trim(3600.0)) as mock_run:
+        apply_time_window(str(src), "60", "120", str(tmp_path / "dl"))
+
+    trim_cmd = mock_run.call_args_list[1][0][0]
+    assert trim_cmd[trim_cmd.index("-ss") + 1] == "60.0"
+    assert trim_cmd[trim_cmd.index("-t") + 1] == "60.0"

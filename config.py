@@ -11,6 +11,12 @@ DEFAULT_CONFIG = {
     "m3u8_url": "",
     "local_path": "",                 # path to a local .mp4 or .ts file (source_type="local")
 
+    # Time window (optional) — restrict the pipeline to a sub-range of the source.
+    # Accepts "HH:MM:SS", "MM:SS", or bare seconds. Either may be empty for "start"
+    # or "end" of the video respectively.
+    "start_time": "",                 # e.g. "1:00:00"
+    "end_time": "",                   # e.g. "1:30:00"
+
     # Download
     "quality": "720p",                # "best" | "1080p" | "720p" | "480p"
     "download_dir": "./downloads",

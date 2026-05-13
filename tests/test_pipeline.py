@@ -22,6 +22,7 @@ def _mock_pipeline(tmp_path, sample_segments, sample_clips, video_filename="vide
          patch("pipeline.get_latest_vodvod_m3u8", return_value=("https://cdn.example.com/chunked/index.m3u8", vod_date)) as mock_m3u8, \
          patch("pipeline.stream_m3u8_to_file", return_value=video_path) as mock_stream, \
          patch("pipeline.resolve_local_file", return_value=(video_path, vod_date)) as mock_local, \
+         patch("pipeline.apply_time_window", side_effect=lambda v, *a, **kw: v) as mock_window, \
          patch("pipeline.extract_audio", return_value=wav_path) as mock_audio, \
          patch("pipeline.transcribe", return_value=sample_segments) as mock_trans, \
          patch("pipeline.select_highlights", return_value=sample_clips[:]) as mock_sel, \
@@ -30,6 +31,7 @@ def _mock_pipeline(tmp_path, sample_segments, sample_clips, video_filename="vide
          patch("pipeline.caption_clip") as mock_caption:
         yield {
             "dl": mock_dl, "m3u8": mock_m3u8, "stream": mock_stream, "local": mock_local,
+            "window": mock_window,
             "audio": mock_audio, "transcribe": mock_trans, "select": mock_sel,
             "peaks": mock_peaks, "extract": mock_extract, "caption": mock_caption,
             "vod_date": vod_date,
@@ -224,6 +226,76 @@ def test_run_local_source_derives_wav_under_download_dir(tmp_path, sample_segmen
     wav_arg = mocks["audio"].call_args[0][1]
     assert str(download_dir) in wav_arg, f"wav should be under download_dir, got {wav_arg}"
     assert str(user_dir) not in wav_arg, f"wav should not be under user_dir, got {wav_arg}"
+
+
+# ---------------------------------------------------------------------------
+# Time window
+# ---------------------------------------------------------------------------
+
+def _twitch_cfg(tmp_path, **overrides):
+    base = {
+        "source_type": "twitch",
+        "twitch_vod_url": "https://www.twitch.tv/videos/123",
+        "quality": "720p",
+        "download_dir": str(tmp_path / "downloads"),
+        "whisper_model": "base",
+        "whisper_device": "cpu",
+        "whisper_language": "en",
+        "llm_backend": "ollama",
+        "ollama_model": "mistral",
+        "clip_mode": "reaction",
+        "max_clips": 5,
+        "clip_padding_seconds": 3,
+        "output_dir": str(tmp_path / "clips"),
+    }
+    base.update(overrides)
+    return base
+
+
+def test_run_with_no_time_window_skips_trim(tmp_path, sample_segments, sample_clips):
+    cfg = _twitch_cfg(tmp_path)
+    with _mock_pipeline(tmp_path, sample_segments, sample_clips) as mocks:
+        run(cfg)
+    mocks["window"].assert_not_called()
+
+
+def test_run_with_start_and_end_calls_window(tmp_path, sample_segments, sample_clips):
+    cfg = _twitch_cfg(tmp_path, start_time="1:00:00", end_time="1:30:00")
+    with _mock_pipeline(tmp_path, sample_segments, sample_clips) as mocks:
+        run(cfg)
+    mocks["window"].assert_called_once()
+    args = mocks["window"].call_args[0]
+    assert args[1] == "1:00:00"   # start_str
+    assert args[2] == "1:30:00"   # end_str
+    assert args[3] == cfg["download_dir"]
+
+
+def test_run_with_only_start_time_calls_window(tmp_path, sample_segments, sample_clips):
+    cfg = _twitch_cfg(tmp_path, start_time="0:30:00")
+    with _mock_pipeline(tmp_path, sample_segments, sample_clips) as mocks:
+        run(cfg)
+    mocks["window"].assert_called_once()
+    args = mocks["window"].call_args[0]
+    assert args[1] == "0:30:00"
+    assert args[2] is None
+
+
+def test_run_with_only_end_time_calls_window(tmp_path, sample_segments, sample_clips):
+    cfg = _twitch_cfg(tmp_path, end_time="0:45:00")
+    with _mock_pipeline(tmp_path, sample_segments, sample_clips) as mocks:
+        run(cfg)
+    mocks["window"].assert_called_once()
+    args = mocks["window"].call_args[0]
+    assert args[1] is None
+    assert args[2] == "0:45:00"
+
+
+def test_run_propagates_window_validation_error(tmp_path, sample_segments, sample_clips):
+    cfg = _twitch_cfg(tmp_path, start_time="2:00:00", end_time="1:00:00")
+    with _mock_pipeline(tmp_path, sample_segments, sample_clips) as mocks:
+        mocks["window"].side_effect = ValueError("end_time must be after start_time")
+        with pytest.raises(ValueError, match="end_time must be after"):
+            run(cfg)
 
 
 # ---------------------------------------------------------------------------

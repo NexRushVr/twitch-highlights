@@ -131,7 +131,7 @@ ffmpeg -version            # ffmpeg on PATH
 yt-dlp --version           # yt-dlp on PATH
 ollama list                # Ollama running, default model present (start the daemon first if this errors)
 python -c "import whisper, torch; print('cuda:', torch.cuda.is_available())"
-pip install -r requirements-dev.txt && pytest -q   # 148 unit tests (no GPU/network needed)
+pip install -r requirements-dev.txt && pytest -q   # 177 unit tests (no GPU/network needed)
 ```
 
 If `torch.cuda.is_available()` prints `False`, see the GPU section above. If `ollama list` errors with a connection refused, start the daemon (`ollama serve` or launch the tray app) and retry.
@@ -168,12 +168,34 @@ Clip modes: `reaction`, `dance`, `hype`, `all`.
 
 LLM backend: `--llm-backend ollama` (default) or `--llm-backend openai` plus `--model <name>`. OpenAI requires `openai_api_key` in your config or `VOD_CLIP_OPENAI_API_KEY` in your env.
 
+### Clipping a sub-range
+
+Restrict the pipeline to a window of the source video — useful when only part of a long stream is worth processing, or when you want to test prompt changes against a 30-minute slice instead of a 4-hour VOD.
+
+```bash
+# Clip only the 1:00:00 — 1:30:00 window:
+python pipeline.py --source-type kick --channel abehamm --start-time 1:00:00 --end-time 1:30:00
+
+# From 1:00:00 to the end of the video:
+python pipeline.py ... --start-time 1:00:00
+
+# From the start to 30:00:
+python pipeline.py ... --end-time 30:00
+```
+
+Time format: `HH:MM:SS`, `MM:SS`, or bare seconds (`3600`).
+
+The window is applied with an ffmpeg stream-copy (no re-encode), then the rest of the pipeline runs on the trimmed file. Output lands in `clips/<streamer>/<vod_date>_w<start>-<end>/` so different windows on the same VOD-date don't collide. Out-of-range bounds raise a clear error before any heavy work starts (e.g. `end_time 4:00:00 exceeds video duration (2:45:00 long)`).
+
+Requires `ffprobe` (ships with ffmpeg) so the pipeline can read the source's duration.
+
 Full CLI surface (`python pipeline.py --help`):
 
 ```
 usage: pipeline.py [-h] [--config CONFIG]
                    [--source-type {twitch,vodvod,m3u8,kick,local}] [--url URL]
                    [--path PATH] [--channel CHANNEL]
+                   [--start-time START_TIME] [--end-time END_TIME]
                    [--clip-mode {reaction,dance,hype,all}]
                    [--max-clips MAX_CLIPS] [--llm-backend {ollama,openai}]
                    [--model MODEL] [--force]
@@ -247,6 +269,8 @@ Env-var example: `VOD_CLIP_OLLAMA_MODEL=llama3.1:8b`, `VOD_CLIP_WHISPER_DEVICE=c
 | `kick_channel` | `""` | slug, no `@` |
 | `m3u8_url` | `""` | direct stream URL |
 | `local_path` | `""` | path to a local `.mp4` or `.ts` (used when `source_type=local`) |
+| `start_time` | `""` | trim the source to start at this point (`HH:MM:SS`, `MM:SS`, or seconds) |
+| `end_time` | `""` | trim the source to end at this point (same formats as `start_time`) |
 | `quality` | `720p` | yt-dlp height cap: `best` \| `1080p` \| `720p` \| `480p` |
 | `download_dir` | `./downloads` | source VOD + extracted WAV cache |
 | `whisper_language` | `en` | Whisper language hint |

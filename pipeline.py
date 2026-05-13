@@ -1,9 +1,11 @@
 import argparse
 import json
 import os
+import re
 
 from config import load_config
 from modules.source_resolver import (
+    apply_time_window,
     download_twitch_vod,
     get_latest_vodvod_m3u8,
     get_latest_kick_vod_m3u8,
@@ -82,10 +84,30 @@ def run(cfg: dict = None) -> list:
     else:
         raise ValueError(f"Unknown source_type: '{source}'")
 
-    # Output dir: <base>/<streamer>/<vod_date>/
+    # Optional time window — trim the source to [start_time, end_time] before
+    # any downstream work. The whole pipeline then sees a shorter video and
+    # behaves identically, so no time-offset bookkeeping is needed.
+    start_str = cfg.get("start_time") or None
+    end_str = cfg.get("end_time") or None
+    windowed = bool(start_str or end_str)
+    if windowed:
+        print(f"    Trimming to window: start={start_str or '0'}  end={end_str or 'EOF'}")
+        video_path = apply_time_window(video_path, start_str, end_str, cfg["download_dir"])
+        print(f"    Windowed source: {video_path}")
+
+    # Output dir: <base>/<streamer>/<vod_date>[_w<start>-<end>]/
+    # When a window is applied we suffix the subdir with the same `_w<s>-<e>`
+    # tag that `apply_time_window` puts on the trimmed file, so two different
+    # windows on the same VOD-date don't trip each other's manifest skip-guard.
+    output_subdir = vod_date
+    if windowed:
+        win_basename = os.path.splitext(os.path.basename(video_path))[0]
+        m = re.search(r"_w\d+-\d+$", win_basename)
+        if m:
+            output_subdir += m.group(0)
     cfg["output_dir"] = (
-        os.path.join(base_output_dir, streamer, vod_date) if streamer
-        else os.path.join(base_output_dir, vod_date)
+        os.path.join(base_output_dir, streamer, output_subdir) if streamer
+        else os.path.join(base_output_dir, output_subdir)
     )
 
     # Skip guard: if a non-empty manifest already exists for this VOD-date, no-op.
@@ -101,11 +123,12 @@ def run(cfg: dict = None) -> list:
             pass
 
     # Step 2: Extract audio (skip if cached)
-    # For `local` source the video may live outside download_dir (we don't copy
-    # the user's file). Anchor derived artifacts to download_dir in that case so
-    # we don't pollute the user's source directory.
+    # For `local` source without a window the video may live outside download_dir
+    # (we don't copy the user's file). Anchor derived artifacts to download_dir in
+    # that case so we don't pollute the user's source directory. Windowing already
+    # puts the trimmed file inside download_dir, so the default derivation works.
     print("[2/7] Extracting audio...")
-    if source == "local":
+    if source == "local" and not windowed:
         os.makedirs(cfg["download_dir"], exist_ok=True)
         derived_base = os.path.join(cfg["download_dir"], vod_date)
     else:
@@ -181,6 +204,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--url", help="Twitch VOD URL or direct m3u8 URL")
     p.add_argument("--path", help="Path to a local .mp4 or .ts file (use with --source-type local)")
     p.add_argument("--channel", help="vodvod.top or kick.com channel handle")
+    p.add_argument("--start-time", help="Trim the source to start at this point (HH:MM:SS, MM:SS, or seconds)")
+    p.add_argument("--end-time", help="Trim the source to end at this point (HH:MM:SS, MM:SS, or seconds)")
     p.add_argument("--clip-mode", choices=["reaction", "dance", "hype", "all"])
     p.add_argument("--max-clips", type=int)
     p.add_argument("--llm-backend", choices=["ollama", "openai"])
@@ -205,6 +230,10 @@ if __name__ == "__main__":
             cfg["m3u8_url"] = args.url
     if args.path:
         cfg["local_path"] = args.path
+    if args.start_time:
+        cfg["start_time"] = args.start_time
+    if args.end_time:
+        cfg["end_time"] = args.end_time
     if args.channel:
         if cfg["source_type"] == "kick":
             cfg["kick_channel"] = args.channel

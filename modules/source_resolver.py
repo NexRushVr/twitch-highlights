@@ -188,3 +188,119 @@ def stream_m3u8_to_file(m3u8_url: str, out_path: str) -> str:
     ]
     subprocess.run(cmd, check=True)
     return out_path
+
+
+# ---------------------------------------------------------------------------
+# Time-window trimming
+# ---------------------------------------------------------------------------
+
+def _parse_time_string(s: str) -> float:
+    """Parse `HH:MM:SS`, `MM:SS`, or bare seconds into a float number of seconds."""
+    s = str(s).strip()
+    if not s:
+        raise ValueError("time string is empty")
+    parts = s.split(":")
+    if len(parts) > 3:
+        raise ValueError(
+            f"invalid time format: {s!r} (use HH:MM:SS, MM:SS, or seconds)"
+        )
+    try:
+        nums = [float(p) for p in parts]
+    except ValueError as e:
+        raise ValueError(
+            f"invalid time format: {s!r} (use HH:MM:SS, MM:SS, or seconds)"
+        ) from e
+    if any(n < 0 for n in nums):
+        raise ValueError(f"time components must be non-negative: {s!r}")
+    if len(nums) == 1:
+        return nums[0]
+    if len(nums) == 2:
+        return nums[0] * 60 + nums[1]
+    return nums[0] * 3600 + nums[1] * 60 + nums[2]
+
+
+def _format_seconds(s: float) -> str:
+    """Format seconds as `H:MM:SS` for human-readable error messages."""
+    total = int(round(s))
+    h, rem = divmod(total, 3600)
+    m, sec = divmod(rem, 60)
+    return f"{h:d}:{m:02d}:{sec:02d}"
+
+
+def _probe_duration(video_path: str) -> float:
+    """Return the duration of `video_path` in seconds via ffprobe."""
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "csv=p=0",
+        video_path,
+    ]
+    result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    return float(result.stdout.strip())
+
+
+def apply_time_window(
+    video_path: str,
+    start_str: str | None,
+    end_str: str | None,
+    download_dir: str,
+) -> str:
+    """Trim `video_path` to `[start, end]` and return the trimmed file path.
+
+    Either bound may be `None` / empty:
+      - no start  → trim from 0
+      - no end    → trim to the video's duration
+      - both none → return `video_path` unchanged (no trim performed)
+
+    Trimmed output is stream-copied (no re-encode) into `download_dir` with a
+    deterministic name that encodes the window, so re-running the same window
+    is a cache hit and a different window doesn't collide.
+
+    Raises `ValueError` if either bound is out of range, inverted, or
+    malformed. Raises `FileNotFoundError` if ffprobe can't read the source.
+    """
+    if not start_str and not end_str:
+        return video_path
+
+    duration = _probe_duration(video_path)
+    start = _parse_time_string(start_str) if start_str else 0.0
+    end = _parse_time_string(end_str) if end_str else duration
+
+    if start < 0:
+        raise ValueError(f"start_time cannot be negative (got {_format_seconds(start)})")
+    if start >= duration:
+        raise ValueError(
+            f"start_time {_format_seconds(start)} is at or past the video's end "
+            f"({_format_seconds(duration)} long)"
+        )
+    if end > duration:
+        raise ValueError(
+            f"end_time {_format_seconds(end)} exceeds video duration "
+            f"({_format_seconds(duration)} long); drop --end-time to clip to the end"
+        )
+    if end <= start:
+        raise ValueError(
+            f"end_time {_format_seconds(end)} must be after "
+            f"start_time {_format_seconds(start)}"
+        )
+
+    os.makedirs(download_dir, exist_ok=True)
+    basename = os.path.splitext(os.path.basename(video_path))[0]
+    out_path = os.path.join(
+        download_dir,
+        f"{basename}_w{int(round(start))}-{int(round(end))}.mp4",
+    )
+
+    if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
+        return out_path
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-ss", str(start),
+        "-i", video_path,
+        "-t", str(end - start),
+        "-c", "copy",
+        out_path,
+    ]
+    subprocess.run(cmd, check=True)
+    return out_path

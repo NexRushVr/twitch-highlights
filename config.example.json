@@ -6,6 +6,9 @@
   "m3u8_url": "",
   "local_path": "",
 
+  "start_time": "",
+  "end_time": "",
+
   "quality": "720p",
   "download_dir": "./downloads",
 

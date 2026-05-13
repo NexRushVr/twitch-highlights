@@ -7,6 +7,13 @@ versioning follows [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `--start-time` / `--end-time` (also `start_time` / `end_time` in config) trim
+  the source video to a sub-range before any downstream work. Either bound may
+  be omitted (no start = 0, no end = video duration). Accepts `HH:MM:SS`,
+  `MM:SS`, or bare seconds. Out-of-range or inverted bounds raise a clear
+  error before audio/transcription/LLM costs are incurred. Windowed runs land
+  in `clips/<streamer>/<vod_date>_w<start>-<end>/` so different windows on the
+  same date have independent manifests. Requires `ffprobe` (ships with ffmpeg).
 - New `local` source type for files already on disk. `--path file.mp4` runs
   the pipeline directly against the recording with no copy; `--path file.ts`
   stream-copies (no re-encode) to `mp4` once into `download_dir` and then
