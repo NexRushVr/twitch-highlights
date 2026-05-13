@@ -3,7 +3,16 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from modules.clip_extractor import extract_clip, batch_extract
+from modules.clip_extractor import ATTRIBUTION_COMMENT, extract_clip, batch_extract
+
+
+def _find_metadata_value(cmd, key):
+    """Return the value of a -metadata key=value pair in cmd, or None if not present."""
+    prefix = f"{key}="
+    for i, arg in enumerate(cmd):
+        if arg == "-metadata" and i + 1 < len(cmd) and cmd[i + 1].startswith(prefix):
+            return cmd[i + 1][len(prefix):]
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -127,3 +136,67 @@ def test_batch_extract_empty_clips_returns_empty(tmp_path, base_config):
         mock_run.return_value = MagicMock(returncode=0)
         result = batch_extract("/video.mp4", [], base_config)
     assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Attribution metadata
+# ---------------------------------------------------------------------------
+
+def test_extract_clip_embeds_attribution_comment():
+    with patch("modules.clip_extractor.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0)
+        extract_clip("/v.mp4", 0.0, 10.0, "/o.mp4")
+
+    cmd = mock_run.call_args[0][0]
+    assert _find_metadata_value(cmd, "comment") == ATTRIBUTION_COMMENT
+
+
+def test_extract_clip_embeds_title_and_description_when_provided():
+    with patch("modules.clip_extractor.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0)
+        extract_clip(
+            "/v.mp4", 0.0, 10.0, "/o.mp4",
+            title="funny_reaction",
+            description="Streamer reacts to surprise jumpscare",
+        )
+
+    cmd = mock_run.call_args[0][0]
+    assert _find_metadata_value(cmd, "title") == "funny_reaction"
+    assert _find_metadata_value(cmd, "description") == "Streamer reacts to surprise jumpscare"
+
+
+def test_extract_clip_omits_optional_metadata_when_absent():
+    with patch("modules.clip_extractor.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0)
+        extract_clip("/v.mp4", 0.0, 10.0, "/o.mp4")
+
+    cmd = mock_run.call_args[0][0]
+    assert _find_metadata_value(cmd, "title") is None
+    assert _find_metadata_value(cmd, "description") is None
+
+
+def test_batch_extract_passes_reason_as_title_and_description(tmp_path, base_config):
+    base_config["output_dir"] = str(tmp_path / "clips")
+    clips = [{"start": 0.0, "end": 10.0, "reason": "hype", "score": 0.9,
+              "description": "Crowd goes wild as streamer hits a clutch shot"}]
+
+    with patch("modules.clip_extractor.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0)
+        batch_extract("/video.mp4", clips, base_config)
+
+    cmd = mock_run.call_args[0][0]
+    assert _find_metadata_value(cmd, "title") == "hype"
+    assert _find_metadata_value(cmd, "description") == "Crowd goes wild as streamer hits a clutch shot"
+    assert _find_metadata_value(cmd, "comment") == ATTRIBUTION_COMMENT
+
+
+def test_batch_extract_skips_blank_description(tmp_path, base_config):
+    base_config["output_dir"] = str(tmp_path / "clips")
+    clips = [{"start": 0.0, "end": 10.0, "reason": "hype", "score": 0.9, "description": ""}]
+
+    with patch("modules.clip_extractor.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0)
+        batch_extract("/video.mp4", clips, base_config)
+
+    cmd = mock_run.call_args[0][0]
+    assert _find_metadata_value(cmd, "description") is None

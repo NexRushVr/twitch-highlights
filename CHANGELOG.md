@@ -6,6 +6,13 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Output mp4s now carry embedded attribution metadata (`comment`, `title`,
+  `description`) so files can be identified as pipeline output after they've
+  been moved or shared. Visible in `ffprobe`, mediainfo, VLC's Codec
+  Information, and Windows Explorer Properties → Details. Not a visible
+  watermark — viewers see no change to the video itself.
+
 ## [1.0.0] - 2026-05-12
 
 Initial public release. A local CLI that turns Twitch / Kick / m3u8 VODs into

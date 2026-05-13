@@ -131,7 +131,7 @@ ffmpeg -version            # ffmpeg on PATH
 yt-dlp --version           # yt-dlp on PATH
 ollama list                # Ollama running, default model present (start the daemon first if this errors)
 python -c "import whisper, torch; print('cuda:', torch.cuda.is_available())"
-pip install -r requirements-dev.txt && pytest -q   # 132 unit tests (no GPU/network needed)
+pip install -r requirements-dev.txt && pytest -q   # 138 unit tests (no GPU/network needed)
 ```
 
 If `torch.cuda.is_available()` prints `False`, see the GPU section above. If `ollama list` errors with a connection refused, start the daemon (`ollama serve` or launch the tray app) and retry.
@@ -180,6 +180,8 @@ clip_001_funny_reaction_captioned.mp4
 clip_001_funny_reaction_captioned.ass    # edit + re-burn without re-running the pipeline
 clips_manifest.json
 ```
+
+Every output mp4 also carries embedded attribution metadata: a `comment` tag pointing at this repo, plus the LLM-generated `title` (reason) and `description` for that specific clip. Visible via `ffprobe -show_format <file>`, mediainfo, VLC → Tools → Codec Information, or Windows Explorer → right-click → Properties → Details. It's there as honest provenance — not a DRM lock and not visible on the video itself.
 
 A `clips_manifest.json` entry looks like:
 

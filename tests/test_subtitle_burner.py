@@ -2,6 +2,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
+from modules.clip_extractor import ATTRIBUTION_COMMENT
 from modules.subtitle_burner import (
     _format_ass_time,
     _escape_ass_text,
@@ -176,6 +177,24 @@ def test_burn_captions_escapes_windows_drive_letter(tmp_path):
     vf = cmd[cmd.index("-vf") + 1]
     # Backslashes converted to forward slashes; drive letter colon escaped
     assert "C\\:/Users/foo/subs.ass" in vf
+
+
+def test_burn_captions_embeds_attribution_comment(tmp_path):
+    in_path = str(tmp_path / "in.mp4")
+    out_path = str(tmp_path / "out.mp4")
+    ass_path = str(tmp_path / "subs.ass")
+
+    with patch("modules.subtitle_burner.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0)
+        burn_captions(in_path, out_path, ass_path)
+
+    cmd = mock_run.call_args[0][0]
+    # `-metadata comment=...` pair must point at the canonical attribution string
+    meta_idx = next(
+        i for i, a in enumerate(cmd)
+        if a == "-metadata" and i + 1 < len(cmd) and cmd[i + 1].startswith("comment=")
+    )
+    assert cmd[meta_idx + 1] == f"comment={ATTRIBUTION_COMMENT}"
 
 
 # ---------------------------------------------------------------------------

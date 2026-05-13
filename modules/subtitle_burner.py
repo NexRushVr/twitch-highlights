@@ -1,6 +1,8 @@
 import os
 import subprocess
 
+from modules.clip_extractor import ATTRIBUTION_COMMENT
+
 
 # Yellow Hype: Impact 80, yellow fill, thick black outline, lower-third.
 # (ASS color is &HAABBGGRR — yellow = 0000FFFF.)
@@ -109,6 +111,7 @@ def burn_captions(input_video: str, output_video: str, ass_path: str) -> str:
         "-c:v", "libx264",
         "-crf", "20",
         "-c:a", "copy",
+        "-metadata", f"comment={ATTRIBUTION_COMMENT}",
         output_video,
     ]
     subprocess.run(cmd, check=True)
