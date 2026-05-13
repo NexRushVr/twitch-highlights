@@ -138,6 +138,8 @@ If `torch.cuda.is_available()` prints `False`, see the GPU section above. If `ol
 
 ## Usage
 
+### Pick a source
+
 ```bash
 # Latest VOD from a Kick channel — Kick keeps VODs indefinitely, so this is
 # the most reliable source for channels that stream on Kick.
@@ -164,28 +166,49 @@ python pipeline.py --source-type local --path "C:/Users/you/Videos/last_night.mp
 python pipeline.py --source-type local --path "C:/Users/you/Videos/last_night.ts"
 ```
 
+### Mix in flags
+
+```bash
+# Just the 1:00:00 — 1:30:00 window of a Kick stream, in `dance` mode.
+python pipeline.py --source-type kick --channel abehamm --clip-mode dance `
+    --start-time 1:00:00 --end-time 1:30:00
+
+# Only the last 30 minutes of a local OBS recording (no end-time = "to the end").
+python pipeline.py --source-type local --path "./obs.mp4" --start-time 1:30:00
+
+# Only the first 10 minutes of a vodvod stream (no start-time = "from the start").
+python pipeline.py --source-type vodvod --channel "@eevi" --end-time 0:10:00
+
+# Tighter clip cap + hype mode + OpenAI backend (uses VOD_CLIP_OPENAI_API_KEY).
+python pipeline.py --source-type kick --channel abehamm --clip-mode hype `
+    --max-clips 5 --llm-backend openai --model gpt-4o-mini
+
+# Re-run today's vodvod clip pass with a different window — `--force` bypasses
+# the manifest skip-guard.
+python pipeline.py --source-type vodvod --channel "@eevi" `
+    --start-time 0:30:00 --end-time 1:00:00 --force
+
+# Drive everything from a JSON config (CLI flags and VOD_CLIP_* env vars still
+# override what's in the file).
+python pipeline.py --config config.json
+```
+
+> PowerShell line-continuation is shown as ` `` `; on macOS/Linux use `\` instead.
+
 Clip modes: `reaction`, `dance`, `hype`, `all`.
 
 LLM backend: `--llm-backend ollama` (default) or `--llm-backend openai` plus `--model <name>`. OpenAI requires `openai_api_key` in your config or `VOD_CLIP_OPENAI_API_KEY` in your env.
 
-### Clipping a sub-range
+### Time window details
 
-Restrict the pipeline to a window of the source video — useful when only part of a long stream is worth processing, or when you want to test prompt changes against a 30-minute slice instead of a 4-hour VOD.
+`--start-time` and `--end-time` accept `HH:MM:SS`, `MM:SS`, or bare seconds (`3600`). Either may be omitted; the missing one defaults to "start of video" or "end of video" respectively.
 
-```bash
-# Clip only the 1:00:00 — 1:30:00 window:
-python pipeline.py --source-type kick --channel abehamm --start-time 1:00:00 --end-time 1:30:00
+The window is applied with an ffmpeg stream-copy (no re-encode), then the rest of the pipeline runs on the trimmed file. Output lands in `clips/<streamer>/<vod_date>_w<start>-<end>/` so different windows on the same VOD-date don't collide. Out-of-range bounds raise a clear error *before* any heavy work starts:
 
-# From 1:00:00 to the end of the video:
-python pipeline.py ... --start-time 1:00:00
-
-# From the start to 30:00:
-python pipeline.py ... --end-time 30:00
 ```
-
-Time format: `HH:MM:SS`, `MM:SS`, or bare seconds (`3600`).
-
-The window is applied with an ffmpeg stream-copy (no re-encode), then the rest of the pipeline runs on the trimmed file. Output lands in `clips/<streamer>/<vod_date>_w<start>-<end>/` so different windows on the same VOD-date don't collide. Out-of-range bounds raise a clear error before any heavy work starts (e.g. `end_time 4:00:00 exceeds video duration (2:45:00 long)`).
+ValueError: end_time 4:00:00 exceeds video duration (2:45:00 long);
+            drop --end-time to clip to the end
+```
 
 Requires `ffprobe` (ships with ffmpeg) so the pipeline can read the source's duration.
 
