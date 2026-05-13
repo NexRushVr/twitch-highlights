@@ -139,6 +139,44 @@ def get_latest_kick_vod_m3u8(channel_slug: str) -> tuple[str, str]:
     return m3u8_url, vod_date
 
 
+def resolve_local_file(path: str, download_dir: str) -> tuple[str, str]:
+    """Resolve a local mp4 or .ts file. Returns (video_path, vod_date_YYYY-MM-DD).
+
+    For `.mp4` the file is used in place (no copy). For `.ts` we stream-copy
+    into `<download_dir>/<vod_date>.mp4` so the rest of the pipeline can treat
+    it like any other mp4 source. Stream-copy = no re-encode: fast, lossless,
+    and works for OBS-style recordings out of the box.
+    """
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"local source file not found: {path}")
+
+    mtime = datetime.fromtimestamp(os.path.getmtime(path), tz=timezone.utc)
+    vod_date = mtime.strftime("%Y-%m-%d")
+
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".mp4":
+        return os.path.abspath(path), vod_date
+
+    if ext == ".ts":
+        os.makedirs(download_dir, exist_ok=True)
+        out_path = os.path.join(download_dir, f"{vod_date}.mp4")
+        if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
+            return out_path, vod_date
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", path,
+            "-c", "copy",
+            "-bsf:a", "aac_adtstoasc",
+            out_path,
+        ]
+        subprocess.run(cmd, check=True)
+        return out_path, vod_date
+
+    raise ValueError(
+        f"unsupported local file extension '{ext}' (expected .mp4 or .ts)"
+    )
+
+
 def stream_m3u8_to_file(m3u8_url: str, out_path: str) -> str:
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     cmd = [

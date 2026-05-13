@@ -7,6 +7,12 @@ versioning follows [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- New `local` source type for files already on disk. `--path file.mp4` runs
+  the pipeline directly against the recording with no copy; `--path file.ts`
+  stream-copies (no re-encode) to `mp4` once into `download_dir` and then
+  reuses the cached output on subsequent runs. Use case: streamers who
+  recorded their own session in OBS and want to clip from the local
+  recording instead of re-pulling from a VOD service.
 - Output mp4s now carry embedded attribution metadata (`comment`, `title`,
   `description`) so files can be identified as pipeline output after they've
   been moved or shared. Visible in `ffprobe`, mediainfo, VLC's Codec

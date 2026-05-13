@@ -21,6 +21,7 @@ def _mock_pipeline(tmp_path, sample_segments, sample_clips, video_filename="vide
     with patch("pipeline.download_twitch_vod", return_value=(video_path, vod_date)) as mock_dl, \
          patch("pipeline.get_latest_vodvod_m3u8", return_value=("https://cdn.example.com/chunked/index.m3u8", vod_date)) as mock_m3u8, \
          patch("pipeline.stream_m3u8_to_file", return_value=video_path) as mock_stream, \
+         patch("pipeline.resolve_local_file", return_value=(video_path, vod_date)) as mock_local, \
          patch("pipeline.extract_audio", return_value=wav_path) as mock_audio, \
          patch("pipeline.transcribe", return_value=sample_segments) as mock_trans, \
          patch("pipeline.select_highlights", return_value=sample_clips[:]) as mock_sel, \
@@ -28,7 +29,7 @@ def _mock_pipeline(tmp_path, sample_segments, sample_clips, video_filename="vide
          patch("pipeline.batch_extract", return_value=[{"file": clip_file, "meta": sample_clips[0]}]) as mock_extract, \
          patch("pipeline.caption_clip") as mock_caption:
         yield {
-            "dl": mock_dl, "m3u8": mock_m3u8, "stream": mock_stream,
+            "dl": mock_dl, "m3u8": mock_m3u8, "stream": mock_stream, "local": mock_local,
             "audio": mock_audio, "transcribe": mock_trans, "select": mock_sel,
             "peaks": mock_peaks, "extract": mock_extract, "caption": mock_caption,
             "vod_date": vod_date,
@@ -145,6 +146,84 @@ def test_run_m3u8_source_calls_stream(tmp_path, sample_segments, sample_clips):
     assert args[0] == cfg["m3u8_url"]
     assert args[1].startswith(cfg["download_dir"])
     assert args[1].endswith(".mp4")
+
+
+# ---------------------------------------------------------------------------
+# Local source
+# ---------------------------------------------------------------------------
+
+def test_run_local_source_calls_resolver_with_path(tmp_path, sample_segments, sample_clips):
+    cfg = {
+        "source_type": "local",
+        "local_path": str(tmp_path / "my_recording.mp4"),
+        "quality": "720p",
+        "download_dir": str(tmp_path / "downloads"),
+        "whisper_model": "base",
+        "whisper_device": "cpu",
+        "whisper_language": "en",
+        "llm_backend": "ollama",
+        "ollama_model": "mistral",
+        "clip_mode": "all",
+        "max_clips": 5,
+        "clip_padding_seconds": 3,
+        "output_dir": str(tmp_path / "clips"),
+    }
+    with _mock_pipeline(tmp_path, sample_segments, sample_clips) as mocks:
+        result = run(cfg)
+
+    mocks["local"].assert_called_once_with(cfg["local_path"], cfg["download_dir"])
+    assert len(result) >= 1
+
+
+def test_run_local_source_without_path_raises(tmp_path, sample_segments, sample_clips):
+    cfg = {
+        "source_type": "local",
+        "local_path": "",   # missing
+        "download_dir": str(tmp_path / "downloads"),
+        "whisper_model": "base",
+        "whisper_device": "cpu",
+        "whisper_language": "en",
+        "llm_backend": "ollama",
+        "ollama_model": "mistral",
+        "clip_mode": "all",
+        "max_clips": 5,
+        "clip_padding_seconds": 3,
+        "output_dir": str(tmp_path / "clips"),
+    }
+    with _mock_pipeline(tmp_path, sample_segments, sample_clips):
+        with pytest.raises(ValueError, match="local"):
+            run(cfg)
+
+
+def test_run_local_source_derives_wav_under_download_dir(tmp_path, sample_segments, sample_clips):
+    """Local source should not pollute the user's source-file directory with .wav / .transcript.json."""
+    user_dir = tmp_path / "user_videos"
+    user_dir.mkdir()
+    source_mp4 = user_dir / "my_stream.mp4"
+    source_mp4.write_bytes(b"data")
+    download_dir = tmp_path / "downloads"
+
+    cfg = {
+        "source_type": "local",
+        "local_path": str(source_mp4),
+        "download_dir": str(download_dir),
+        "whisper_model": "base",
+        "whisper_device": "cpu",
+        "whisper_language": "en",
+        "llm_backend": "ollama",
+        "ollama_model": "mistral",
+        "clip_mode": "all",
+        "max_clips": 5,
+        "clip_padding_seconds": 3,
+        "output_dir": str(tmp_path / "clips"),
+    }
+    with _mock_pipeline(tmp_path, sample_segments, sample_clips) as mocks:
+        run(cfg)
+
+    # extract_audio's out_wav (2nd positional arg) must live under download_dir, not user_dir.
+    wav_arg = mocks["audio"].call_args[0][1]
+    assert str(download_dir) in wav_arg, f"wav should be under download_dir, got {wav_arg}"
+    assert str(user_dir) not in wav_arg, f"wav should not be under user_dir, got {wav_arg}"
 
 
 # ---------------------------------------------------------------------------

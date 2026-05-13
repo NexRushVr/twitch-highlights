@@ -4,11 +4,12 @@ from pathlib import Path
 
 DEFAULT_CONFIG = {
     # Source
-    "source_type": "twitch",          # "twitch" | "m3u8" | "vodvod" | "kick"
+    "source_type": "twitch",          # "twitch" | "m3u8" | "vodvod" | "kick" | "local"
     "twitch_vod_url": "",
     "vodvod_channel": "",             # e.g. "@your_channel"
     "kick_channel": "",               # e.g. "your_channel"
     "m3u8_url": "",
+    "local_path": "",                 # path to a local .mp4 or .ts file (source_type="local")
 
     # Download
     "quality": "720p",                # "best" | "1080p" | "720p" | "480p"

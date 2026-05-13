@@ -7,6 +7,7 @@ from modules.source_resolver import (
     download_twitch_vod,
     get_latest_vodvod_m3u8,
     get_latest_kick_vod_m3u8,
+    resolve_local_file,
     stream_m3u8_to_file,
 )
 from modules.audio_extractor import extract_audio, get_audio_peaks
@@ -73,6 +74,11 @@ def run(cfg: dict = None) -> list:
         video_path = os.path.join(cfg["download_dir"], f"{vod_date}.mp4")
         if not (os.path.exists(video_path) and os.path.getsize(video_path) > 0):
             stream_m3u8_to_file(cfg["m3u8_url"], video_path)
+    elif source == "local":
+        if not cfg.get("local_path"):
+            raise ValueError("source_type='local' requires --path or local_path in config")
+        video_path, vod_date = resolve_local_file(cfg["local_path"], cfg["download_dir"])
+        print(f"    Local source: {video_path}  (vod_date={vod_date})")
     else:
         raise ValueError(f"Unknown source_type: '{source}'")
 
@@ -95,8 +101,16 @@ def run(cfg: dict = None) -> list:
             pass
 
     # Step 2: Extract audio (skip if cached)
+    # For `local` source the video may live outside download_dir (we don't copy
+    # the user's file). Anchor derived artifacts to download_dir in that case so
+    # we don't pollute the user's source directory.
     print("[2/7] Extracting audio...")
-    wav_path = os.path.splitext(video_path)[0] + ".wav"
+    if source == "local":
+        os.makedirs(cfg["download_dir"], exist_ok=True)
+        derived_base = os.path.join(cfg["download_dir"], vod_date)
+    else:
+        derived_base = os.path.splitext(video_path)[0]
+    wav_path = derived_base + ".wav"
     if os.path.exists(wav_path) and os.path.getsize(wav_path) > 0:
         print(f"    Using cached audio: {wav_path}")
     else:
@@ -163,8 +177,9 @@ def run(cfg: dict = None) -> list:
 def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="VOD Clip Pipeline")
     p.add_argument("--config", help="Path to JSON config file")
-    p.add_argument("--source-type", choices=["twitch", "vodvod", "m3u8", "kick"])
+    p.add_argument("--source-type", choices=["twitch", "vodvod", "m3u8", "kick", "local"])
     p.add_argument("--url", help="Twitch VOD URL or direct m3u8 URL")
+    p.add_argument("--path", help="Path to a local .mp4 or .ts file (use with --source-type local)")
     p.add_argument("--channel", help="vodvod.top or kick.com channel handle")
     p.add_argument("--clip-mode", choices=["reaction", "dance", "hype", "all"])
     p.add_argument("--max-clips", type=int)
@@ -188,6 +203,8 @@ if __name__ == "__main__":
             cfg["twitch_vod_url"] = args.url
         else:
             cfg["m3u8_url"] = args.url
+    if args.path:
+        cfg["local_path"] = args.path
     if args.channel:
         if cfg["source_type"] == "kick":
             cfg["kick_channel"] = args.channel

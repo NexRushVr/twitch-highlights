@@ -4,6 +4,7 @@
   "vodvod_channel": "@your_channel",
   "kick_channel": "",
   "m3u8_url": "",
+  "local_path": "",
 
   "quality": "720p",
   "download_dir": "./downloads",

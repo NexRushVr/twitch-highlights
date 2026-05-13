@@ -35,7 +35,7 @@ python pipeline.py --source-type vodvod --channel "@eevi" --clip-mode all
 
 Output lands in `clips/<streamer>/<vod_date>/`. Re-running on the same VOD is a fast no-op — every step is cached per VOD-date.
 
-> **Picking a source type:** Use `twitch` when you have a still-live VOD URL — perfect for clipping your own streams. Use `kick` for any Kick channel. Use `vodvod` for older Twitch streams whose original VODs have expired (Twitch only retains them 14–60 days depending on the streamer's tier).
+> **Picking a source type:** Use `twitch` when you have a still-live VOD URL — perfect for clipping your own streams. Use `kick` for any Kick channel. Use `vodvod` for older Twitch streams whose original VODs have expired (Twitch only retains them 14–60 days depending on the streamer's tier). Use `local` when you already have the recording on disk (OBS output, downloaded VOD, etc.) as an `.mp4` or `.ts`.
 
 ## How it works
 
@@ -131,7 +131,7 @@ ffmpeg -version            # ffmpeg on PATH
 yt-dlp --version           # yt-dlp on PATH
 ollama list                # Ollama running, default model present (start the daemon first if this errors)
 python -c "import whisper, torch; print('cuda:', torch.cuda.is_available())"
-pip install -r requirements-dev.txt && pytest -q   # 138 unit tests (no GPU/network needed)
+pip install -r requirements-dev.txt && pytest -q   # 148 unit tests (no GPU/network needed)
 ```
 
 If `torch.cuda.is_available()` prints `False`, see the GPU section above. If `ollama list` errors with a connection refused, start the daemon (`ollama serve` or launch the tray app) and retry.
@@ -154,6 +154,14 @@ python pipeline.py --source-type twitch --url https://www.twitch.tv/videos/23456
 
 # A raw m3u8 stream — for when you already have a manifest URL in hand.
 python pipeline.py --source-type m3u8 --url https://example.com/stream.m3u8
+
+# A local mp4 you already recorded (OBS, screen capture, downloaded VOD, etc.).
+# No re-download, no scraping — pipeline runs straight on your file.
+python pipeline.py --source-type local --path "C:/Users/you/Videos/last_night.mp4"
+
+# A local .ts (OBS's default replay-buffer format works fine).
+# Stream-copied to mp4 once into ./downloads/ then cached for re-runs.
+python pipeline.py --source-type local --path "C:/Users/you/Videos/last_night.ts"
 ```
 
 Clip modes: `reaction`, `dance`, `hype`, `all`.
@@ -164,8 +172,9 @@ Full CLI surface (`python pipeline.py --help`):
 
 ```
 usage: pipeline.py [-h] [--config CONFIG]
-                   [--source-type {twitch,vodvod,m3u8,kick}] [--url URL]
-                   [--channel CHANNEL] [--clip-mode {reaction,dance,hype,all}]
+                   [--source-type {twitch,vodvod,m3u8,kick,local}] [--url URL]
+                   [--path PATH] [--channel CHANNEL]
+                   [--clip-mode {reaction,dance,hype,all}]
                    [--max-clips MAX_CLIPS] [--llm-backend {ollama,openai}]
                    [--model MODEL] [--force]
 ```
@@ -219,7 +228,7 @@ Env-var example: `VOD_CLIP_OLLAMA_MODEL=llama3.1:8b`, `VOD_CLIP_WHISPER_DEVICE=c
 
 | Key | Default | Notes |
 | --- | --- | --- |
-| `source_type` | `twitch` | `twitch` \| `vodvod` \| `kick` \| `m3u8` |
+| `source_type` | `twitch` | `twitch` \| `vodvod` \| `kick` \| `m3u8` \| `local` |
 | `clip_mode` | `reaction` | `reaction` \| `dance` \| `hype` \| `all` |
 | `max_clips` | `10` | hard cap on output count |
 | `whisper_device` | `cuda` | **`cuda` will crash on a CPU-only machine — set `cpu` explicitly if no GPU** |
@@ -237,6 +246,7 @@ Env-var example: `VOD_CLIP_OLLAMA_MODEL=llama3.1:8b`, `VOD_CLIP_WHISPER_DEVICE=c
 | `vodvod_channel` | `""` | e.g. `@shroud` |
 | `kick_channel` | `""` | slug, no `@` |
 | `m3u8_url` | `""` | direct stream URL |
+| `local_path` | `""` | path to a local `.mp4` or `.ts` (used when `source_type=local`) |
 | `quality` | `720p` | yt-dlp height cap: `best` \| `1080p` \| `720p` \| `480p` |
 | `download_dir` | `./downloads` | source VOD + extracted WAV cache |
 | `whisper_language` | `en` | Whisper language hint |

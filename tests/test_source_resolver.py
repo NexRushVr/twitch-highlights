@@ -9,6 +9,7 @@ from modules.source_resolver import (
     download_twitch_vod,
     get_latest_vodvod_m3u8,
     get_latest_kick_vod_m3u8,
+    resolve_local_file,
     stream_m3u8_to_file,
 )
 
@@ -275,3 +276,98 @@ def test_stream_m3u8_to_file_creates_parent_dir(tmp_path):
         stream_m3u8_to_file("https://example.com/s.m3u8", out)
 
     assert (tmp_path / "nested" / "dir").exists()
+
+
+# ---------------------------------------------------------------------------
+# resolve_local_file
+# ---------------------------------------------------------------------------
+
+def test_resolve_local_file_mp4_returns_path_in_place(tmp_path):
+    src = tmp_path / "stream_recording.mp4"
+    src.write_bytes(b"\x00" * 16)
+    download_dir = tmp_path / "downloads"
+
+    with patch("modules.source_resolver.subprocess.run") as mock_run:
+        path, date = resolve_local_file(str(src), str(download_dir))
+
+    # mp4 path: no ffmpeg invocation, no copy.
+    mock_run.assert_not_called()
+    assert path == str(src.resolve()) or path == str(src.absolute())
+    assert len(date) == 10 and date[4] == "-" and date[7] == "-"
+
+
+def test_resolve_local_file_mp4_does_not_create_download_dir(tmp_path):
+    src = tmp_path / "stream.mp4"
+    src.write_bytes(b"data")
+    download_dir = tmp_path / "should_not_exist"
+
+    with patch("modules.source_resolver.subprocess.run"):
+        resolve_local_file(str(src), str(download_dir))
+
+    assert not download_dir.exists(), "mp4 path should not touch download_dir"
+
+
+def test_resolve_local_file_ts_transcodes_to_mp4(tmp_path):
+    src = tmp_path / "stream.ts"
+    src.write_bytes(b"\x47\x40\x00" * 100)  # arbitrary bytes; ffmpeg is mocked
+    download_dir = tmp_path / "downloads"
+
+    with patch("modules.source_resolver.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0)
+        path, date = resolve_local_file(str(src), str(download_dir))
+
+    cmd = mock_run.call_args[0][0]
+    assert "ffmpeg" in cmd
+    assert str(src) in cmd
+    # Stream-copy: no re-encode.
+    assert "-c" in cmd and "copy" in cmd
+    assert "aac_adtstoasc" in cmd
+    # Output mp4 lands inside download_dir keyed by date.
+    assert path.endswith(f"{date}.mp4")
+    assert download_dir.name in path
+
+
+def test_resolve_local_file_ts_skips_transcode_when_cached(tmp_path):
+    src = tmp_path / "stream.ts"
+    src.write_bytes(b"data")
+    download_dir = tmp_path / "downloads"
+    download_dir.mkdir()
+    # Pre-create a non-empty cached mp4 keyed by today / src mtime date.
+    from datetime import datetime, timezone
+    mtime = datetime.fromtimestamp(src.stat().st_mtime, tz=timezone.utc)
+    cached = download_dir / f"{mtime.strftime('%Y-%m-%d')}.mp4"
+    cached.write_bytes(b"cached")
+
+    with patch("modules.source_resolver.subprocess.run") as mock_run:
+        path, _ = resolve_local_file(str(src), str(download_dir))
+
+    mock_run.assert_not_called()
+    assert path == str(cached)
+
+
+def test_resolve_local_file_missing_raises(tmp_path):
+    missing = tmp_path / "nope.mp4"
+    with pytest.raises(FileNotFoundError, match="local source file"):
+        resolve_local_file(str(missing), str(tmp_path))
+
+
+def test_resolve_local_file_unsupported_extension_raises(tmp_path):
+    src = tmp_path / "stream.mkv"
+    src.write_bytes(b"data")
+    with pytest.raises(ValueError, match="unsupported local file extension"):
+        resolve_local_file(str(src), str(tmp_path))
+
+
+def test_resolve_local_file_uses_mtime_for_vod_date(tmp_path):
+    import os as _os
+    from datetime import datetime, timezone
+
+    src = tmp_path / "stream.mp4"
+    src.write_bytes(b"data")
+    target_ts = datetime(2026, 1, 15, 12, 0, 0, tzinfo=timezone.utc).timestamp()
+    _os.utime(src, (target_ts, target_ts))
+
+    with patch("modules.source_resolver.subprocess.run"):
+        _, date = resolve_local_file(str(src), str(tmp_path / "dl"))
+
+    assert date == "2026-01-15"
