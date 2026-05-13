@@ -5,7 +5,7 @@ description = "Local, GPU-accelerated highlight extractor for Twitch / Kick VODs
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
-authors = [{ name = "Michael Mumma" }]
+authors = [{ name = "NexRushVr" }]
 keywords = ["twitch", "kick", "vod", "highlights", "whisper", "ollama", "ffmpeg"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
