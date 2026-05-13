@@ -99,7 +99,7 @@ def build_ass(segments: list, clip_start: float, clip_end: float, padding: float
     return "\n".join(lines) + "\n"
 
 
-def burn_captions(input_video: str, output_video: str, ass_path: str) -> str:
+def burn_captions(input_video: str, output_video: str, ass_path: str, quiet: bool = False) -> str:
     """Burn an ASS subtitle file into a video via ffmpeg."""
     # ffmpeg's vf parser uses ':' as a separator, so Windows drive letters need escaping.
     # Single quote the path for the filter, then escape ':' inside it.
@@ -114,15 +114,27 @@ def burn_captions(input_video: str, output_video: str, ass_path: str) -> str:
         "-metadata", f"comment={ATTRIBUTION_COMMENT}",
         output_video,
     ]
-    subprocess.run(cmd, check=True)
+    kwargs = {"check": True}
+    if quiet:
+        kwargs["stdout"] = subprocess.DEVNULL
+        kwargs["stderr"] = subprocess.PIPE
+    subprocess.run(cmd, **kwargs)
     return output_video
 
 
-def caption_clip(input_video: str, output_video: str, segments: list, clip_start: float, clip_end: float, padding: float) -> str:
+def caption_clip(
+    input_video: str,
+    output_video: str,
+    segments: list,
+    clip_start: float,
+    clip_end: float,
+    padding: float,
+    quiet: bool = False,
+) -> str:
     """End-to-end: build ASS for the clip's transcript window, burn it in. Returns output path."""
     ass_path = os.path.splitext(output_video)[0] + ".ass"
     ass_text = build_ass(segments, clip_start, clip_end, padding)
     with open(ass_path, "w", encoding="utf-8") as f:
         f.write(ass_text)
-    burn_captions(input_video, output_video, ass_path)
+    burn_captions(input_video, output_video, ass_path, quiet=quiet)
     return output_video

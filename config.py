@@ -43,6 +43,15 @@ DEFAULT_CONFIG = {
     # Output
     "output_dir": "./clips",
     "burn_subtitles": True,
+
+    # Display
+    "verbose": False,                 # show full subprocess / per-chunk log spam
+
+    # Runtime estimate (controls the overall-% display).
+    # Expected wall-clock = source_duration * factor. Heuristic defaults:
+    # CUDA ≈ 0.15, CPU ≈ 1.5 (Whisper is the dominant phase). Override here if
+    # your hardware is noticeably faster or slower than the defaults assume.
+    "runtime_estimate_factor": 0.0,   # 0 = auto-pick from whisper_device
 }
 
 CONFIG = DEFAULT_CONFIG.copy()

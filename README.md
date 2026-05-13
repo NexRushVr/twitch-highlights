@@ -131,7 +131,7 @@ ffmpeg -version            # ffmpeg on PATH
 yt-dlp --version           # yt-dlp on PATH
 ollama list                # Ollama running, default model present (start the daemon first if this errors)
 python -c "import whisper, torch; print('cuda:', torch.cuda.is_available())"
-pip install -r requirements-dev.txt && pytest -q   # 177 unit tests (no GPU/network needed)
+pip install -r requirements-dev.txt && pytest -q   # 192 unit tests (no GPU/network needed)
 ```
 
 If `torch.cuda.is_available()` prints `False`, see the GPU section above. If `ollama list` errors with a connection refused, start the daemon (`ollama serve` or launch the tray app) and retry.
@@ -195,6 +195,40 @@ python pipeline.py --config config.json
 
 > PowerShell line-continuation is shown as ` `` `; on macOS/Linux use `\` instead.
 
+### What you'll see while it runs
+
+By default the display is compact — phase headers, progress bars on iterating phases, and an overall % anchored to an upfront wall-clock estimate. Example for a 2-hour VOD on a CUDA GPU:
+
+```
+[1/7] Resolving source...  (overall 0%)
+    Expected total runtime: ~18:00 (based on source duration)
+       v done in 0:02  (overall 0%, ~17:58 left of ~18:00)
+[2/7] Extracting audio...  (overall 0%, ~17:58 left of ~18:00)
+       v done in 0:08  (overall 1%, ~17:50 left of ~18:00)
+[3/7] Transcribing with Whisper...  (overall 1%, ~17:50 left of ~18:00)
+       [Whisper's own per-segment progress bar prints here]
+       v done in 15:22  (overall 86%, ~2:36 left of ~18:00)
+[4/7] LLM highlight selection...  (overall 86%, ~2:36 left of ~18:00)
+       LLM chunks: 100%|███████████| 4/4 [01:12<00:00, 18.0s/it]
+       v done in 1:12  (overall 92%, ~1:24 left of ~18:00)
+[5/7] Cross-referencing audio peaks...  (overall 92%, ~1:24 left of ~18:00)
+       v done in 0:03  (overall 92%, ~1:21 left of ~18:00)
+[6/7] Cutting clips with FFmpeg...  (overall 92%, ~1:21 left of ~18:00)
+       clips: 100%|████████████████| 10/10 [00:15<00:00, 1.5s/it]
+       v done in 0:15  (overall 93%, ~1:06 left of ~18:00)
+[7/7] Burning CapCut-style captions...  (overall 93%, ~1:06 left of ~18:00)
+       captions: 100%|█████████████| 10/10 [00:32<00:00, 3.2s/it]
+       v done in 0:32  (overall 94%, ~1:02 left of ~18:00)
+
+Done. 10 clips -> clips/abehamm/2026-05-13
+   Manifest: clips/abehamm/2026-05-13/clips_manifest.json
+   Total time: 17:34
+```
+
+Overall % is `elapsed / expected_total`, where expected is the source duration × a hardware factor (~0.15 on CUDA, ~1.5 on CPU). It's clamped to 99% mid-run so a faster-than-expected pass doesn't oscillate past 100%. Override the factor with `runtime_estimate_factor` in config if your hardware is significantly different.
+
+Pass `--verbose` to get the old chatty behavior: ffmpeg / yt-dlp / Whisper / per-LLM-chunk logs all stream through. Useful when something's failing and you want to see the raw output.
+
 Clip modes: `reaction`, `dance`, `hype`, `all`.
 
 LLM backend: `--llm-backend ollama` (default) or `--llm-backend openai` plus `--model <name>`. OpenAI requires `openai_api_key` in your config or `VOD_CLIP_OPENAI_API_KEY` in your env.
@@ -221,7 +255,7 @@ usage: pipeline.py [-h] [--config CONFIG]
                    [--start-time START_TIME] [--end-time END_TIME]
                    [--clip-mode {reaction,dance,hype,all}]
                    [--max-clips MAX_CLIPS] [--llm-backend {ollama,openai}]
-                   [--model MODEL] [--force]
+                   [--model MODEL] [--force] [--verbose]
 ```
 
 **Expected runtime** (RTX 3090, 4-hour 1080p VOD): ~20–40 min total — most of it Whisper transcription. Output is roughly 10 × 15–45 s mp4s, a few hundred MB total.
@@ -281,6 +315,8 @@ Env-var example: `VOD_CLIP_OLLAMA_MODEL=llama3.1:8b`, `VOD_CLIP_WHISPER_DEVICE=c
 | `llm_backend` | `ollama` | `ollama` \| `openai` |
 | `ollama_model` | `qwen2.5:14b` | any model pulled into your local Ollama |
 | `burn_subtitles` | `true` | also produce a `*_captioned.mp4` per clip |
+| `verbose` | `false` | stream all subprocess output + per-chunk LLM logs (compact display is the default) |
+| `runtime_estimate_factor` | `0.0` | overall-% predictor; `0.0` = auto (~0.15 for CUDA, ~1.5 for CPU). Set explicitly if your hardware is unusually fast/slow. |
 
 <details>
 <summary><b>Advanced settings</b></summary>

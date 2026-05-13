@@ -7,6 +7,16 @@ versioning follows [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Compact progress display: per-phase headers, tqdm bars for iterating phases
+  (LLM chunks / clip cuts / caption burns), and an overall % that reports
+  `elapsed / expected_total` instead of `phases_completed`. Expected total
+  comes from `ffprobe`-ing the source duration and multiplying by a hardware
+  factor (~0.15 for CUDA, ~1.5 for CPU; configurable via
+  `runtime_estimate_factor`). Subprocess output (ffmpeg, yt-dlp, Whisper's
+  per-segment prints, per-chunk LLM logs) is suppressed by default; pass
+  `--verbose` to restore the old chatty mode. Whisper's own progress bar
+  still prints in non-verbose mode since it's a real progress signal, not
+  log spam. Stderr stays captured so failures still surface diagnostics.
 - `--start-time` / `--end-time` (also `start_time` / `end_time` in config) trim
   the source video to a sub-range before any downstream work. Either bound may
   be omitted (no start = 0, no end = video duration). Accepts `HH:MM:SS`,

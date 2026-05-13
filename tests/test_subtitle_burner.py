@@ -218,4 +218,4 @@ def test_caption_clip_writes_ass_and_calls_burn(tmp_path):
         content = f.read()
     assert "hello" in content
     assert "[Script Info]" in content
-    mock_burn.assert_called_once_with(in_path, out_path, ass_path)
+    mock_burn.assert_called_once_with(in_path, out_path, ass_path, quiet=False)

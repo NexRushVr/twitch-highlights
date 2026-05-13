@@ -26,6 +26,7 @@ def extract_clip(
     padding: float = 3.0,
     title: str | None = None,
     description: str | None = None,
+    quiet: bool = False,
 ) -> str:
     actual_start = max(0.0, start - padding)
     actual_end = end + padding
@@ -42,15 +43,24 @@ def extract_clip(
         *_metadata_args(title=title, description=description),
         out_path,
     ]
-    subprocess.run(cmd, check=True)
+    kwargs = {"check": True}
+    if quiet:
+        kwargs["stdout"] = subprocess.DEVNULL
+        kwargs["stderr"] = subprocess.PIPE
+    subprocess.run(cmd, **kwargs)
     return out_path
 
 
-def batch_extract(video_path: str, clips: list, config: dict) -> list:
+def batch_extract(video_path: str, clips: list, config: dict, progress=None) -> list:
     os.makedirs(config["output_dir"], exist_ok=True)
     output_files = []
+    quiet = not bool(config.get("verbose", False))
 
-    for i, clip in enumerate(clips):
+    iterable = enumerate(clips)
+    if progress is not None:
+        iterable = enumerate(progress.iter(clips, total=len(clips), desc="clips"))
+
+    for i, clip in iterable:
         reason = clip.get("reason", "clip")
         fname = f"clip_{i + 1:03d}_{reason}.mp4"
         out = os.path.join(config["output_dir"], fname)
@@ -62,6 +72,7 @@ def batch_extract(video_path: str, clips: list, config: dict) -> list:
             config.get("clip_padding_seconds", 3.0),
             title=reason,
             description=clip.get("description") or None,
+            quiet=quiet,
         )
         output_files.append({"file": out, "meta": clip})
 

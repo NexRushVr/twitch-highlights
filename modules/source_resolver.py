@@ -20,7 +20,7 @@ def _today_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
-def download_twitch_vod(url: str, quality: str, out_dir: str) -> tuple[str, str]:
+def download_twitch_vod(url: str, quality: str, out_dir: str, quiet: bool = False) -> tuple[str, str]:
     """Download a Twitch VOD. Returns (video_path, vod_date_YYYY-MM-DD)."""
     os.makedirs(out_dir, exist_ok=True)
     height = quality.rstrip("p")
@@ -33,7 +33,14 @@ def download_twitch_vod(url: str, quality: str, out_dir: str) -> tuple[str, str]
         "--no-playlist",
         url,
     ]
-    subprocess.run(cmd, check=True)
+    # yt-dlp has its own --quiet flag which silences the progress bar plus most
+    # other chatter; combined with stderr=PIPE the user sees nothing unless
+    # the call fails.
+    if quiet:
+        cmd.insert(1, "--quiet")
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    else:
+        subprocess.run(cmd, check=True)
 
     info_files = sorted(
         Path(out_dir).glob("*.info.json"),
@@ -139,7 +146,7 @@ def get_latest_kick_vod_m3u8(channel_slug: str) -> tuple[str, str]:
     return m3u8_url, vod_date
 
 
-def resolve_local_file(path: str, download_dir: str) -> tuple[str, str]:
+def resolve_local_file(path: str, download_dir: str, quiet: bool = False) -> tuple[str, str]:
     """Resolve a local mp4 or .ts file. Returns (video_path, vod_date_YYYY-MM-DD).
 
     For `.mp4` the file is used in place (no copy). For `.ts` we stream-copy
@@ -169,7 +176,7 @@ def resolve_local_file(path: str, download_dir: str) -> tuple[str, str]:
             "-bsf:a", "aac_adtstoasc",
             out_path,
         ]
-        subprocess.run(cmd, check=True)
+        _run_ffmpeg(cmd, quiet=quiet)
         return out_path, vod_date
 
     raise ValueError(
@@ -177,7 +184,7 @@ def resolve_local_file(path: str, download_dir: str) -> tuple[str, str]:
     )
 
 
-def stream_m3u8_to_file(m3u8_url: str, out_path: str) -> str:
+def stream_m3u8_to_file(m3u8_url: str, out_path: str, quiet: bool = False) -> str:
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     cmd = [
         "ffmpeg", "-y",
@@ -186,8 +193,16 @@ def stream_m3u8_to_file(m3u8_url: str, out_path: str) -> str:
         "-bsf:a", "aac_adtstoasc",
         out_path,
     ]
-    subprocess.run(cmd, check=True)
+    _run_ffmpeg(cmd, quiet=quiet)
     return out_path
+
+
+def _run_ffmpeg(cmd: list, quiet: bool) -> None:
+    """Run an ffmpeg command, silencing stdout/stderr when quiet."""
+    if quiet:
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    else:
+        subprocess.run(cmd, check=True)
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +259,7 @@ def apply_time_window(
     start_str: str | None,
     end_str: str | None,
     download_dir: str,
+    quiet: bool = False,
 ) -> str:
     """Trim `video_path` to `[start, end]` and return the trimmed file path.
 
@@ -302,5 +318,5 @@ def apply_time_window(
         "-c", "copy",
         out_path,
     ]
-    subprocess.run(cmd, check=True)
+    _run_ffmpeg(cmd, quiet=quiet)
     return out_path

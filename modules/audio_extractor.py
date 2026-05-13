@@ -8,7 +8,7 @@ except ImportError:
     np = None
 
 
-def extract_audio(video_path: str, out_wav: str) -> str:
+def extract_audio(video_path: str, out_wav: str, quiet: bool = False) -> str:
     cmd = [
         "ffmpeg", "-y",
         "-i", video_path,
@@ -18,7 +18,11 @@ def extract_audio(video_path: str, out_wav: str) -> str:
         "-f", "wav",
         out_wav,
     ]
-    subprocess.run(cmd, check=True)
+    kwargs = {"check": True}
+    if quiet:
+        kwargs["stdout"] = subprocess.DEVNULL
+        kwargs["stderr"] = subprocess.PIPE  # captured so errors are still surfaced
+    subprocess.run(cmd, **kwargs)
     return out_wav
 
 

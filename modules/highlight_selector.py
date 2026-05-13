@@ -174,24 +174,40 @@ def _call_llm(system_prompt: str, user_message: str, config: dict) -> str:
     return _call_ollama(system_prompt, user_message, config)
 
 
-def select_highlights(segments: list, config: dict) -> list:
+def select_highlights(segments: list, config: dict, progress=None) -> list:
+    """Run the LLM clip-selection prompt over the transcript.
+
+    `progress` is an optional `modules.progress.Progress` instance; if given,
+    chunk iteration is wrapped in a tqdm bar and per-chunk console prints are
+    suppressed (the bar replaces them). In verbose mode the original chatty
+    output is preserved.
+    """
     system_prompt = _build_system_prompt(config)
     chunks = chunk_transcript(segments, max_chars=6000)
     all_clips: list = []
+    verbose = bool(config.get("verbose", False))
 
-    for i, chunk in enumerate(chunks, start=1):
+    iterable = enumerate(chunks, start=1)
+    if progress is not None and not verbose:
+        # Bar replaces the per-chunk prints; failures still print so they're
+        # not silently swallowed.
+        iterable = enumerate(progress.iter(chunks, total=len(chunks), desc="LLM chunks"), start=1)
+
+    for i, chunk in iterable:
         chunk_text = "\n".join(
             f"[{s['start']:.1f}s - {s['end']:.1f}s] {s['text']}"
             for s in chunk
         )
-        print(f"    LLM chunk {i}/{len(chunks)} ({len(chunk)} segments)...", flush=True)
+        if verbose:
+            print(f"    LLM chunk {i}/{len(chunks)} ({len(chunk)} segments)...", flush=True)
         try:
             raw = _call_llm(system_prompt, chunk_text, config)
         except Exception as e:
             print(f"    LLM chunk {i} failed: {type(e).__name__}: {e}", flush=True)
             continue
         parsed = _parse_clips_from_response(raw)
-        print(f"    LLM chunk {i}/{len(chunks)} -> {len(parsed)} candidates", flush=True)
+        if verbose:
+            print(f"    LLM chunk {i}/{len(chunks)} -> {len(parsed)} candidates", flush=True)
         all_clips.extend(parsed)
 
     all_clips.sort(key=lambda x: x.get("score", 0), reverse=True)

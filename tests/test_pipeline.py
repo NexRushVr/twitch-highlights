@@ -61,7 +61,9 @@ def test_run_twitch_source_calls_download(tmp_path, sample_segments, sample_clip
     with _mock_pipeline(tmp_path, sample_segments, sample_clips) as mocks:
         result = run(cfg)
 
-    mocks["dl"].assert_called_once_with(cfg["twitch_vod_url"], cfg["quality"], cfg["download_dir"])
+    mocks["dl"].assert_called_once_with(
+        cfg["twitch_vod_url"], cfg["quality"], cfg["download_dir"], quiet=True,
+    )
     assert len(result) >= 1
 
 
@@ -173,7 +175,7 @@ def test_run_local_source_calls_resolver_with_path(tmp_path, sample_segments, sa
     with _mock_pipeline(tmp_path, sample_segments, sample_clips) as mocks:
         result = run(cfg)
 
-    mocks["local"].assert_called_once_with(cfg["local_path"], cfg["download_dir"])
+    mocks["local"].assert_called_once_with(cfg["local_path"], cfg["download_dir"], quiet=True)
     assert len(result) >= 1
 
 

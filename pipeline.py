@@ -11,12 +11,14 @@ from modules.source_resolver import (
     get_latest_kick_vod_m3u8,
     resolve_local_file,
     stream_m3u8_to_file,
+    _probe_duration,
 )
 from modules.audio_extractor import extract_audio, get_audio_peaks
 from modules.transcriber import transcribe
 from modules.highlight_selector import select_highlights
 from modules.clip_extractor import batch_extract
 from modules.subtitle_burner import caption_clip
+from modules.progress import Progress, fmt_seconds
 
 
 def _streamer_subdir(cfg: dict) -> str:
@@ -33,6 +35,23 @@ def _today_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
+def _estimate_total_runtime(video_path: str, cfg: dict) -> float | None:
+    """Best-effort wall-clock estimate for the whole pipeline, in seconds.
+
+    Returns None if we can't probe the source. The estimate drives the
+    `overall N%` display so the user sees real progress vs expected time.
+    """
+    factor = float(cfg.get("runtime_estimate_factor") or 0.0)
+    if factor <= 0:
+        # Auto-pick by device. CPU Whisper is roughly 10× slower than CUDA.
+        factor = 1.5 if cfg.get("whisper_device") == "cpu" else 0.15
+    try:
+        duration = _probe_duration(video_path)
+    except Exception:
+        return None
+    return duration * factor
+
+
 def run(cfg: dict = None) -> list:
     if cfg is None:
         cfg = load_config()
@@ -46,54 +65,70 @@ def run(cfg: dict = None) -> list:
         cfg["download_dir"] = os.path.join(base_download_dir, streamer)
         cfg["output_dir"] = os.path.join(base_output_dir, streamer)
 
-    # Step 1: Resolve source (per-VOD-date cache)
-    print("[1/7] Resolving source...")
-    source = cfg["source_type"]
-    os.makedirs(cfg["download_dir"], exist_ok=True)
+    verbose = bool(cfg.get("verbose", False))
+    quiet = not verbose
+    progress = Progress(verbose=verbose)
 
-    if source == "vodvod":
-        m3u8_url, vod_date = get_latest_vodvod_m3u8(cfg["vodvod_channel"])
-        print(f"    Latest VOD: {vod_date}  m3u8: {m3u8_url}")
-        video_path = os.path.join(cfg["download_dir"], f"{vod_date}.mp4")
-        if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
-            print(f"    Using cached video: {video_path}")
-        else:
-            stream_m3u8_to_file(m3u8_url, video_path)
-    elif source == "kick":
-        m3u8_url, vod_date = get_latest_kick_vod_m3u8(cfg["kick_channel"])
-        print(f"    Latest VOD: {vod_date}  m3u8: {m3u8_url}")
-        video_path = os.path.join(cfg["download_dir"], f"{vod_date}.mp4")
-        if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
-            print(f"    Using cached video: {video_path}")
-        else:
-            stream_m3u8_to_file(m3u8_url, video_path)
-    elif source == "twitch":
-        video_path, vod_date = download_twitch_vod(
-            cfg["twitch_vod_url"], cfg["quality"], cfg["download_dir"]
-        )
-    elif source == "m3u8":
-        vod_date = _today_iso()
-        video_path = os.path.join(cfg["download_dir"], f"{vod_date}.mp4")
-        if not (os.path.exists(video_path) and os.path.getsize(video_path) > 0):
-            stream_m3u8_to_file(cfg["m3u8_url"], video_path)
-    elif source == "local":
-        if not cfg.get("local_path"):
-            raise ValueError("source_type='local' requires --path or local_path in config")
-        video_path, vod_date = resolve_local_file(cfg["local_path"], cfg["download_dir"])
-        print(f"    Local source: {video_path}  (vod_date={vod_date})")
-    else:
-        raise ValueError(f"Unknown source_type: '{source}'")
+    # Step 1: Resolve source (per-VOD-date cache) + optional time-window trim
+    with progress.phase("source", "Resolving source"):
+        source = cfg["source_type"]
+        os.makedirs(cfg["download_dir"], exist_ok=True)
 
-    # Optional time window — trim the source to [start_time, end_time] before
-    # any downstream work. The whole pipeline then sees a shorter video and
-    # behaves identically, so no time-offset bookkeeping is needed.
-    start_str = cfg.get("start_time") or None
-    end_str = cfg.get("end_time") or None
-    windowed = bool(start_str or end_str)
-    if windowed:
-        print(f"    Trimming to window: start={start_str or '0'}  end={end_str or 'EOF'}")
-        video_path = apply_time_window(video_path, start_str, end_str, cfg["download_dir"])
-        print(f"    Windowed source: {video_path}")
+        if source == "vodvod":
+            m3u8_url, vod_date = get_latest_vodvod_m3u8(cfg["vodvod_channel"])
+            if verbose:
+                print(f"    Latest VOD: {vod_date}  m3u8: {m3u8_url}")
+            video_path = os.path.join(cfg["download_dir"], f"{vod_date}.mp4")
+            if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
+                print(f"    Using cached video: {video_path}")
+            else:
+                stream_m3u8_to_file(m3u8_url, video_path, quiet=quiet)
+        elif source == "kick":
+            m3u8_url, vod_date = get_latest_kick_vod_m3u8(cfg["kick_channel"])
+            if verbose:
+                print(f"    Latest VOD: {vod_date}  m3u8: {m3u8_url}")
+            video_path = os.path.join(cfg["download_dir"], f"{vod_date}.mp4")
+            if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
+                print(f"    Using cached video: {video_path}")
+            else:
+                stream_m3u8_to_file(m3u8_url, video_path, quiet=quiet)
+        elif source == "twitch":
+            video_path, vod_date = download_twitch_vod(
+                cfg["twitch_vod_url"], cfg["quality"], cfg["download_dir"], quiet=quiet
+            )
+        elif source == "m3u8":
+            vod_date = _today_iso()
+            video_path = os.path.join(cfg["download_dir"], f"{vod_date}.mp4")
+            if not (os.path.exists(video_path) and os.path.getsize(video_path) > 0):
+                stream_m3u8_to_file(cfg["m3u8_url"], video_path, quiet=quiet)
+        elif source == "local":
+            if not cfg.get("local_path"):
+                raise ValueError("source_type='local' requires --path or local_path in config")
+            video_path, vod_date = resolve_local_file(cfg["local_path"], cfg["download_dir"], quiet=quiet)
+            if verbose:
+                print(f"    Local source: {video_path}  (vod_date={vod_date})")
+        else:
+            raise ValueError(f"Unknown source_type: '{source}'")
+
+        # Optional time window — trim the source to [start_time, end_time] before
+        # any downstream work. The whole pipeline then sees a shorter video and
+        # behaves identically, so no time-offset bookkeeping is needed.
+        start_str = cfg.get("start_time") or None
+        end_str = cfg.get("end_time") or None
+        windowed = bool(start_str or end_str)
+        if windowed:
+            print(f"    Trimming to window: start={start_str or '0'}  end={end_str or 'EOF'}")
+            video_path = apply_time_window(
+                video_path, start_str, end_str, cfg["download_dir"], quiet=quiet
+            )
+
+    # Now that the source (post-window) is on disk, we can estimate the total
+    # wall-clock runtime so the overall-% display reflects elapsed-vs-expected
+    # rather than just "fraction of phase weights done."
+    estimate = _estimate_total_runtime(video_path, cfg)
+    if estimate is not None:
+        progress.set_estimated_total(estimate)
+        print(f"    Expected total runtime: ~{fmt_seconds(estimate)} (based on source duration)")
 
     # Output dir: <base>/<streamer>/<vod_date>[_w<start>-<end>]/
     # When a window is applied we suffix the subdir with the same `_w<s>-<e>`
@@ -122,67 +157,74 @@ def run(cfg: dict = None) -> list:
         except (OSError, json.JSONDecodeError):
             pass
 
-    # Step 2: Extract audio (skip if cached)
-    # For `local` source without a window the video may live outside download_dir
-    # (we don't copy the user's file). Anchor derived artifacts to download_dir in
-    # that case so we don't pollute the user's source directory. Windowing already
-    # puts the trimmed file inside download_dir, so the default derivation works.
-    print("[2/7] Extracting audio...")
+    # Anchor derived artifacts. `local` source without a window may have a
+    # video_path outside download_dir (we don't copy the user's file); send
+    # derived files into download_dir to avoid polluting the user's directory.
     if source == "local" and not windowed:
         os.makedirs(cfg["download_dir"], exist_ok=True)
         derived_base = os.path.join(cfg["download_dir"], vod_date)
     else:
         derived_base = os.path.splitext(video_path)[0]
     wav_path = derived_base + ".wav"
-    if os.path.exists(wav_path) and os.path.getsize(wav_path) > 0:
-        print(f"    Using cached audio: {wav_path}")
-    else:
-        extract_audio(video_path, wav_path)
+    transcript_path = os.path.splitext(wav_path)[0] + ".transcript.json"
+
+    # Step 2: Extract audio
+    with progress.phase("audio", "Extracting audio"):
+        if os.path.exists(wav_path) and os.path.getsize(wav_path) > 0:
+            print(f"    Using cached audio: {wav_path}")
+        else:
+            extract_audio(video_path, wav_path, quiet=quiet)
 
     # Step 3: Transcribe (cache transcript JSON next to the wav)
-    print("[3/7] Transcribing with Whisper...")
-    transcript_path = os.path.splitext(wav_path)[0] + ".transcript.json"
-    if os.path.exists(transcript_path) and os.path.getsize(transcript_path) > 0:
-        with open(transcript_path) as f:
-            segments = json.load(f)
-        print(f"    Using cached transcript: {transcript_path} ({len(segments)} segments)")
-    else:
-        segments = transcribe(wav_path, cfg["whisper_model"], cfg["whisper_device"])
-        with open(transcript_path, "w", encoding="utf-8") as f:
-            json.dump(segments, f)
-        print(f"    {len(segments)} segments transcribed")
+    with progress.phase("transcribe", "Transcribing with Whisper"):
+        if os.path.exists(transcript_path) and os.path.getsize(transcript_path) > 0:
+            with open(transcript_path) as f:
+                segments = json.load(f)
+            print(f"    Using cached transcript: {len(segments)} segments")
+        else:
+            segments = transcribe(
+                wav_path, cfg["whisper_model"], cfg["whisper_device"], verbose=verbose
+            )
+            with open(transcript_path, "w", encoding="utf-8") as f:
+                json.dump(segments, f)
+            if verbose:
+                print(f"    {len(segments)} segments transcribed")
 
     # Step 4: LLM highlight selection
-    print("[4/7] Running LLM highlight selection...")
-    clips = select_highlights(segments, cfg)
-    print(f"    {len(clips)} clip candidates identified")
+    with progress.phase("llm", "LLM highlight selection"):
+        clips = select_highlights(segments, cfg, progress=progress)
+        if verbose:
+            print(f"    {len(clips)} clip candidates identified")
 
     # Step 5: Audio peak cross-reference
-    print("[5/7] Cross-referencing audio peaks...")
-    peaks = get_audio_peaks(wav_path)
-    for clip in clips:
-        for peak in peaks:
-            if peak["start"] <= clip["start"] <= peak["end"]:
-                clip["score"] = min(1.0, clip.get("score", 0) + 0.1)
-    clips.sort(key=lambda x: x.get("score", 0), reverse=True)
-    clips = clips[: cfg["max_clips"]]
+    with progress.phase("peaks", "Cross-referencing audio peaks"):
+        peaks = get_audio_peaks(wav_path)
+        for clip in clips:
+            for peak in peaks:
+                if peak["start"] <= clip["start"] <= peak["end"]:
+                    clip["score"] = min(1.0, clip.get("score", 0) + 0.1)
+        clips.sort(key=lambda x: x.get("score", 0), reverse=True)
+        clips = clips[: cfg["max_clips"]]
 
     # Step 6: Extract clips
-    print("[6/7] Cutting clips with FFmpeg...")
-    extracted = batch_extract(video_path, clips, cfg)
+    with progress.phase("clip", "Cutting clips with FFmpeg"):
+        extracted = batch_extract(video_path, clips, cfg, progress=progress)
 
     # Step 7: Captioned variant (CapCut-style burned-in subtitles)
     if cfg.get("burn_subtitles", True):
-        print("[7/7] Burning CapCut-style captions...")
-        padding = float(cfg.get("clip_padding_seconds", 3.0))
-        for item in extracted:
-            meta = item["meta"]
-            captioned = os.path.splitext(item["file"])[0] + "_captioned.mp4"
-            try:
-                caption_clip(item["file"], captioned, segments, meta["start"], meta["end"], padding)
-                item["captioned"] = captioned
-            except Exception as e:
-                print(f"    captioning failed for {item['file']}: {type(e).__name__}: {e}")
+        with progress.phase("caption", "Burning CapCut-style captions"):
+            padding = float(cfg.get("clip_padding_seconds", 3.0))
+            for item in progress.iter(extracted, total=len(extracted), desc="captions"):
+                meta = item["meta"]
+                captioned = os.path.splitext(item["file"])[0] + "_captioned.mp4"
+                try:
+                    caption_clip(
+                        item["file"], captioned, segments,
+                        meta["start"], meta["end"], padding, quiet=quiet,
+                    )
+                    item["captioned"] = captioned
+                except Exception as e:
+                    print(f"    captioning failed for {item['file']}: {type(e).__name__}: {e}")
     else:
         print("[7/7] Skipping captions (burn_subtitles disabled).")
 
@@ -192,8 +234,9 @@ def run(cfg: dict = None) -> list:
     with open(manifest_path, "w") as f:
         json.dump(extracted, f, indent=2)
 
-    print(f"\nDone. {len(extracted)} clips saved to {cfg['output_dir']}/")
+    print(f"\nDone. {len(extracted)} clips -> {cfg['output_dir']}")
     print(f"   Manifest: {manifest_path}")
+    print(f"   Total time: {fmt_seconds(progress.total_elapsed())}")
     return extracted
 
 
@@ -212,6 +255,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--model", help="Ollama or OpenAI model name")
     p.add_argument("--force", action="store_true",
                    help="Regenerate clips even if a manifest already exists for this VOD-date")
+    p.add_argument("--verbose", action="store_true",
+                   help="Show full subprocess output and per-chunk LLM logs (default: compact progress display)")
     return p
 
 
@@ -250,5 +295,7 @@ if __name__ == "__main__":
         cfg[key] = args.model
     if args.force:
         cfg["force"] = True
+    if args.verbose:
+        cfg["verbose"] = True
 
     run(cfg)
