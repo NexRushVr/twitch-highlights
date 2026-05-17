@@ -8,6 +8,10 @@ Local, GPU-accelerated highlight extractor for Twitch / Kick VODs and raw m3u8 s
 
 **What you get:** vertical, CapCut-style captioned short clips (`*_captioned.mp4`) plus the horizontal source cuts, ready to upload to TikTok / Shorts / Reels. Everything runs on your own machine — no cloud APIs required if you use Ollama.
 
+**Two ways to pick clips:**
+- **AI picks** (`--clip-mode all`) — a local LLM reads the transcript and picks the funniest / most hype moments for you.
+- **You voice-mark them** (`--clip-mode phrase`) — say a phrase like "clip it" on stream, and it cuts a window around every spot you said it. No hotkeys, no scrubbing the VOD afterward.
+
 **Who it's for:** streamers, clippers, and editors who want a "pick last night's best 10 moments and burn captions" command, not a manual scrub-and-cut workflow.
 
 **Cost:** free (MIT). The only paid path is optional OpenAI usage; the default (`ollama` + a local Whisper model) costs $0 once installed.
@@ -50,7 +54,7 @@ pipeline.py
 prompts/                          # base + per-mode LLM prompts (edit freely)
 ```
 
-The pipeline pulls the source VOD, transcribes the audio with Whisper, asks an LLM to pick the best clip windows from the transcript, cross-references those picks against audio-loudness peaks, cuts with ffmpeg, and burns CapCut-style captions on top.
+The pipeline pulls the source VOD, transcribes the audio with Whisper, then picks clip windows from the transcript — either an **LLM** chooses the best moments (`reaction` / `dance` / `hype` / `all`), or a plain **transcript scan** finds every time you said a trigger phrase (`phrase`). Picks are cross-referenced against audio-loudness peaks, cut with ffmpeg, and get CapCut-style captions burned on top. The LLM-vs-phrase choice is just `--clip-mode`; everything downstream is identical.
 
 ## Requirements
 
