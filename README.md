@@ -131,7 +131,7 @@ ffmpeg -version            # ffmpeg on PATH
 yt-dlp --version           # yt-dlp on PATH
 ollama list                # Ollama running, default model present (start the daemon first if this errors)
 python -c "import whisper, torch; print('cuda:', torch.cuda.is_available())"
-pip install -r requirements-dev.txt && pytest -q   # 192 unit tests (no GPU/network needed)
+pip install -r requirements-dev.txt && pytest -q   # 211 unit tests (no GPU/network needed)
 ```
 
 If `torch.cuda.is_available()` prints `False`, see the GPU section above. If `ollama list` errors with a connection refused, start the daemon (`ollama serve` or launch the tray app) and retry.
@@ -183,6 +183,12 @@ python pipeline.py --source-type vodvod --channel "@eevi" --end-time 0:10:00
 python pipeline.py --source-type kick --channel abehamm --clip-mode hype `
     --max-clips 5 --llm-backend openai --model gpt-4o-mini
 
+# Voice-marked clips: cut a window around every spot the streamer said your
+# trigger phrase. No LLM — pure transcript scan. Great for clipping your own
+# stream by just saying a phrase instead of pressing hotkeys.
+python pipeline.py --source-type local --path "./obs.mp4" --clip-mode phrase `
+    --trigger-phrase "clip it" --phrase-pre 60 --phrase-post 30
+
 # Re-run today's vodvod clip pass with a different window — `--force` bypasses
 # the manifest skip-guard.
 python pipeline.py --source-type vodvod --channel "@eevi" `
@@ -225,13 +231,31 @@ Done. 10 clips -> clips/abehamm/2026-05-13
    Total time: 17:34
 ```
 
+During output-silent phases (the download, ffmpeg audio extract, librosa peak scan) a live ticker rewrites one line in place — `\ Resolving source — 1:24 elapsed, ~16:36 left of ~18:00` — so a long quiet step visibly counts up instead of looking frozen. (The ticker is TTY-only; in pipes / CI / redirected logs it's silent so output stays clean.)
+
 Overall % is `elapsed / expected_total`, where expected is the source duration × a hardware factor (~0.15 on CUDA, ~1.5 on CPU). It's clamped to 99% mid-run so a faster-than-expected pass doesn't oscillate past 100%. Override the factor with `runtime_estimate_factor` in config if your hardware is significantly different.
 
 Pass `--verbose` to get the old chatty behavior: ffmpeg / yt-dlp / Whisper / per-LLM-chunk logs all stream through. Useful when something's failing and you want to see the raw output.
 
-Clip modes: `reaction`, `dance`, `hype`, `all`.
+Clip modes: `reaction`, `dance`, `hype`, `all` (LLM-driven), and `phrase` (transcript scan, no LLM).
 
 LLM backend: `--llm-backend ollama` (default) or `--llm-backend openai` plus `--model <name>`. OpenAI requires `openai_api_key` in your config or `VOD_CLIP_OPENAI_API_KEY` in your env.
+
+### Phrase mode (voice-marked clips)
+
+`--clip-mode phrase` skips the LLM entirely. It scans the Whisper transcript for a trigger phrase and cuts a window around every occurrence — so you can "mark" clips mid-stream just by saying something, instead of hitting a hotkey:
+
+```bash
+python pipeline.py --source-type local --path "./last_stream.mp4" \
+    --clip-mode phrase --trigger-phrase "clip that" --phrase-pre 60 --phrase-post 30
+```
+
+- **`--trigger-phrase`** — any phrase you want (case-insensitive substring match). Default `clip it`. Pick something you wouldn't say by accident.
+- **`--phrase-pre` / `--phrase-post`** — seconds of context before/after the phrase. Default 60 / 60.
+- Every match is kept — phrase mode ignores `--max-clips` (the whole point is to catch them all). If you say the phrase twice within overlapping windows, they merge into one clip.
+- Configurable via `config.json` (`trigger_phrase`, `phrase_pre_seconds`, `phrase_post_seconds`) or env vars (`VOD_CLIP_TRIGGER_PHRASE`, etc.) too.
+
+> Tip: this still downloads + transcribes the whole VOD. A future enhancement could fetch audio-only for the transcript, then range-download just the clip windows — open an issue if you want that.
 
 ### Time window details
 
@@ -253,7 +277,9 @@ usage: pipeline.py [-h] [--config CONFIG]
                    [--source-type {twitch,vodvod,m3u8,kick,local}] [--url URL]
                    [--path PATH] [--channel CHANNEL]
                    [--start-time START_TIME] [--end-time END_TIME]
-                   [--clip-mode {reaction,dance,hype,all}]
+                   [--clip-mode {reaction,dance,hype,all,phrase}]
+                   [--trigger-phrase TRIGGER_PHRASE]
+                   [--phrase-pre PHRASE_PRE] [--phrase-post PHRASE_POST]
                    [--max-clips MAX_CLIPS] [--llm-backend {ollama,openai}]
                    [--model MODEL] [--force] [--verbose]
 ```
@@ -308,7 +334,10 @@ Env-var example: `VOD_CLIP_OLLAMA_MODEL=llama3.1:8b`, `VOD_CLIP_WHISPER_DEVICE=c
 | Key | Default | Notes |
 | --- | --- | --- |
 | `source_type` | `twitch` | `twitch` \| `vodvod` \| `kick` \| `m3u8` \| `local` |
-| `clip_mode` | `reaction` | `reaction` \| `dance` \| `hype` \| `all` |
+| `clip_mode` | `reaction` | `reaction` \| `dance` \| `hype` \| `all` \| `phrase` |
+| `trigger_phrase` | `clip it` | phrase that marks a clip when `clip_mode=phrase` (case-insensitive) |
+| `phrase_pre_seconds` | `60` | seconds of context before the trigger phrase |
+| `phrase_post_seconds` | `60` | seconds of context after the trigger phrase |
 | `max_clips` | `10` | hard cap on output count |
 | `whisper_device` | `cuda` | **`cuda` will crash on a CPU-only machine — set `cpu` explicitly if no GPU** |
 | `whisper_model` | `large-v3` | `tiny` \| `base` \| `small` \| `medium` \| `large-v3` |

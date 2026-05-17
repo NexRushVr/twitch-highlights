@@ -174,6 +174,52 @@ def _call_llm(system_prompt: str, user_message: str, config: dict) -> str:
     return _call_ollama(system_prompt, user_message, config)
 
 
+def _sanitize_reason(phrase: str) -> str:
+    """Turn a trigger phrase into a filename-safe clip reason tag."""
+    tag = re.sub(r"[^a-z0-9]+", "_", phrase.strip().lower()).strip("_")
+    return tag or "phrase"
+
+
+def select_by_phrase(segments: list, config: dict) -> list:
+    """Cut a window around every transcript segment that contains the
+    configured trigger phrase. No LLM call — this is the "voice-mark your
+    own clips" path.
+
+    Window = [match_start - pre, match_end + post], floored at 0. Overlapping
+    windows (e.g. the streamer says "clip it" twice within a minute) are
+    merged by `deduplicate_clips`, so a burst of triggers yields one clip.
+    Every match is returned — phrase mode is intentionally not capped by
+    `max_clips`; the whole point is to catch them all.
+    """
+    phrase = str(config.get("trigger_phrase", "clip it")).strip().lower()
+    if not phrase:
+        return []
+    pre = float(config.get("phrase_pre_seconds", 60.0))
+    post = float(config.get("phrase_post_seconds", 60.0))
+    reason = _sanitize_reason(phrase)
+
+    hits: list = []
+    for seg in segments:
+        text = (seg.get("text") or "")
+        if phrase not in text.lower():
+            continue
+        try:
+            seg_start = float(seg["start"])
+            seg_end = float(seg["end"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        hits.append({
+            "start": max(0.0, seg_start - pre),
+            "end": seg_end + post,
+            "reason": reason,
+            "score": 1.0,
+            "description": text.strip(),
+        })
+
+    hits.sort(key=lambda c: c["start"])
+    return deduplicate_clips(hits)
+
+
 def select_highlights(segments: list, config: dict, progress=None) -> list:
     """Run the LLM clip-selection prompt over the transcript.
 
@@ -182,6 +228,9 @@ def select_highlights(segments: list, config: dict, progress=None) -> list:
     suppressed (the bar replaces them). In verbose mode the original chatty
     output is preserved.
     """
+    if config.get("clip_mode") == "phrase":
+        return select_by_phrase(segments, config)
+
     system_prompt = _build_system_prompt(config)
     chunks = chunk_transcript(segments, max_chars=6000)
     all_clips: list = []

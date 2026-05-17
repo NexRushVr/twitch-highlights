@@ -7,6 +7,16 @@ versioning follows [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `clip_mode=phrase`: skip the LLM and cut a window around every spot the
+  streamer says a configurable trigger phrase (`--trigger-phrase`, default
+  `clip it`; `--phrase-pre` / `--phrase-post`, default 60s each). Voice-mark
+  clips mid-stream instead of pressing hotkeys. Overlapping triggers merge;
+  every match is kept (phrase mode ignores `max_clips`). Configurable via CLI,
+  `config.json`, or `VOD_CLIP_TRIGGER_PHRASE` etc.
+- Live elapsed-time ticker during output-silent phases (source download,
+  ffmpeg audio extract, librosa peaks). Rewrites one line in place so a long
+  quiet step visibly counts up instead of looking hung — this was the
+  "it froze on Resolving source" confusion. TTY-only; silent in pipes/CI.
 - Compact progress display: per-phase headers, tqdm bars for iterating phases
   (LLM chunks / clip cuts / caption burns), and an overall % that reports
   `elapsed / expected_total` instead of `phases_completed`. Expected total

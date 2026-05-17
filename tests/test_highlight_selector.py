@@ -6,9 +6,11 @@ import pytest
 from modules.highlight_selector import (
     chunk_transcript,
     deduplicate_clips,
+    select_by_phrase,
     select_highlights,
     _parse_clips_from_response,
     _build_system_prompt,
+    _sanitize_reason,
 )
 
 
@@ -341,3 +343,91 @@ def test_with_retries_does_not_retry_non_transient():
     with pytest.raises(ValueError):
         _with_retries(fn, attempts=4, base_delay=0)
     assert fn.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Phrase mode: _sanitize_reason
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("phrase,expected", [
+    ("clip it", "clip_it"),
+    ("CLIP IT", "clip_it"),
+    ("  clip   that!!  ", "clip_that"),
+    ("nice-shot", "nice_shot"),
+    ("???", "phrase"),
+    ("", "phrase"),
+])
+def test_sanitize_reason(phrase, expected):
+    assert _sanitize_reason(phrase) == expected
+
+
+# ---------------------------------------------------------------------------
+# Phrase mode: select_by_phrase
+# ---------------------------------------------------------------------------
+
+def _segs():
+    return [
+        {"start": 100.0, "end": 103.0, "text": "okay let's go"},
+        {"start": 200.0, "end": 202.0, "text": "oh that was insane CLIP IT please"},
+        {"start": 500.0, "end": 503.0, "text": "nothing happening here"},
+        {"start": 900.0, "end": 902.0, "text": "yo clip it clip it"},
+    ]
+
+
+def test_select_by_phrase_finds_matches_case_insensitive():
+    cfg = {"trigger_phrase": "clip it", "phrase_pre_seconds": 60, "phrase_post_seconds": 60}
+    clips = select_by_phrase(_segs(), cfg)
+    # Two distinct trigger spots (200s and 900s); 100s/500s have no phrase.
+    assert len(clips) == 2
+    assert clips[0]["start"] == 140.0   # 200 - 60
+    assert clips[0]["end"] == 262.0     # 202 + 60
+    assert clips[1]["start"] == 840.0   # 900 - 60
+
+
+def test_select_by_phrase_window_floored_at_zero():
+    segs = [{"start": 10.0, "end": 12.0, "text": "clip it now"}]
+    cfg = {"trigger_phrase": "clip it", "phrase_pre_seconds": 60, "phrase_post_seconds": 30}
+    clips = select_by_phrase(segs, cfg)
+    assert clips[0]["start"] == 0.0     # max(0, 10 - 60)
+    assert clips[0]["end"] == 42.0      # 12 + 30
+
+
+def test_select_by_phrase_custom_phrase():
+    segs = [{"start": 50.0, "end": 52.0, "text": "that was a HIGHLIGHT moment"}]
+    cfg = {"trigger_phrase": "highlight", "phrase_pre_seconds": 5, "phrase_post_seconds": 5}
+    clips = select_by_phrase(segs, cfg)
+    assert len(clips) == 1
+    assert clips[0]["reason"] == "highlight"
+    assert clips[0]["description"] == "that was a HIGHLIGHT moment"
+
+
+def test_select_by_phrase_no_matches_returns_empty():
+    cfg = {"trigger_phrase": "supercalifragilistic"}
+    assert select_by_phrase(_segs(), cfg) == []
+
+
+def test_select_by_phrase_empty_phrase_returns_empty():
+    assert select_by_phrase(_segs(), {"trigger_phrase": "   "}) == []
+
+
+def test_select_by_phrase_merges_overlapping_triggers():
+    # Two "clip it"s 20s apart with 60s windows → overlapping → dedup to 1.
+    segs = [
+        {"start": 300.0, "end": 302.0, "text": "clip it"},
+        {"start": 320.0, "end": 322.0, "text": "clip it again"},
+    ]
+    cfg = {"trigger_phrase": "clip it", "phrase_pre_seconds": 60, "phrase_post_seconds": 60}
+    clips = select_by_phrase(segs, cfg)
+    assert len(clips) == 1
+
+
+def test_select_highlights_routes_to_phrase_mode_without_llm():
+    """clip_mode=phrase must not touch the LLM backend at all."""
+    segs = [{"start": 10.0, "end": 12.0, "text": "clip it"}]
+    cfg = {"clip_mode": "phrase", "trigger_phrase": "clip it",
+           "phrase_pre_seconds": 5, "phrase_post_seconds": 5}
+    with patch("modules.highlight_selector._call_llm") as mock_llm:
+        clips = select_highlights(segs, cfg)
+    mock_llm.assert_not_called()
+    assert len(clips) == 1
+    assert clips[0]["reason"] == "clip_it"

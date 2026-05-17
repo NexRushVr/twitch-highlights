@@ -176,7 +176,8 @@ def run(cfg: dict = None) -> list:
             extract_audio(video_path, wav_path, quiet=quiet)
 
     # Step 3: Transcribe (cache transcript JSON next to the wav)
-    with progress.phase("transcribe", "Transcribing with Whisper"):
+    # spinner=False: Whisper prints its own per-segment progress bar.
+    with progress.phase("transcribe", "Transcribing with Whisper", spinner=False):
         if os.path.exists(transcript_path) and os.path.getsize(transcript_path) > 0:
             with open(transcript_path) as f:
                 segments = json.load(f)
@@ -190,8 +191,13 @@ def run(cfg: dict = None) -> list:
             if verbose:
                 print(f"    {len(segments)} segments transcribed")
 
-    # Step 4: LLM highlight selection
-    with progress.phase("llm", "LLM highlight selection"):
+    # Step 4: Clip selection (LLM, or transcript phrase scan)
+    # spinner=False: select_highlights drives its own tqdm bar via progress.iter.
+    if cfg.get("clip_mode") == "phrase":
+        sel_label = f"Scanning transcript for '{cfg.get('trigger_phrase', 'clip it')}'"
+    else:
+        sel_label = "LLM highlight selection"
+    with progress.phase("llm", sel_label, spinner=False):
         clips = select_highlights(segments, cfg, progress=progress)
         if verbose:
             print(f"    {len(clips)} clip candidates identified")
@@ -204,15 +210,19 @@ def run(cfg: dict = None) -> list:
                 if peak["start"] <= clip["start"] <= peak["end"]:
                     clip["score"] = min(1.0, clip.get("score", 0) + 0.1)
         clips.sort(key=lambda x: x.get("score", 0), reverse=True)
-        clips = clips[: cfg["max_clips"]]
+        # Phrase mode is "catch every time I said the trigger" — don't truncate.
+        if cfg.get("clip_mode") != "phrase":
+            clips = clips[: cfg["max_clips"]]
 
     # Step 6: Extract clips
-    with progress.phase("clip", "Cutting clips with FFmpeg"):
+    # spinner=False: batch_extract drives its own per-clip tqdm bar.
+    with progress.phase("clip", "Cutting clips with FFmpeg", spinner=False):
         extracted = batch_extract(video_path, clips, cfg, progress=progress)
 
     # Step 7: Captioned variant (CapCut-style burned-in subtitles)
     if cfg.get("burn_subtitles", True):
-        with progress.phase("caption", "Burning CapCut-style captions"):
+        # spinner=False: the caption loop drives its own per-item tqdm bar.
+        with progress.phase("caption", "Burning CapCut-style captions", spinner=False):
             padding = float(cfg.get("clip_padding_seconds", 3.0))
             for item in progress.iter(extracted, total=len(extracted), desc="captions"):
                 meta = item["meta"]
@@ -249,7 +259,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--channel", help="vodvod.top or kick.com channel handle")
     p.add_argument("--start-time", help="Trim the source to start at this point (HH:MM:SS, MM:SS, or seconds)")
     p.add_argument("--end-time", help="Trim the source to end at this point (HH:MM:SS, MM:SS, or seconds)")
-    p.add_argument("--clip-mode", choices=["reaction", "dance", "hype", "all"])
+    p.add_argument("--clip-mode", choices=["reaction", "dance", "hype", "all", "phrase"])
+    p.add_argument("--trigger-phrase",
+                   help="Phrase that marks a clip when clip-mode=phrase (default: 'clip it')")
+    p.add_argument("--phrase-pre", type=float,
+                   help="Seconds of context before the trigger phrase (default: 60)")
+    p.add_argument("--phrase-post", type=float,
+                   help="Seconds of context after the trigger phrase (default: 60)")
     p.add_argument("--max-clips", type=int)
     p.add_argument("--llm-backend", choices=["ollama", "openai"])
     p.add_argument("--model", help="Ollama or OpenAI model name")
@@ -286,6 +302,12 @@ if __name__ == "__main__":
             cfg["vodvod_channel"] = args.channel
     if args.clip_mode:
         cfg["clip_mode"] = args.clip_mode
+    if args.trigger_phrase:
+        cfg["trigger_phrase"] = args.trigger_phrase
+    if args.phrase_pre is not None:
+        cfg["phrase_pre_seconds"] = args.phrase_pre
+    if args.phrase_post is not None:
+        cfg["phrase_post_seconds"] = args.phrase_post
     if args.max_clips:
         cfg["max_clips"] = args.max_clips
     if args.llm_backend:

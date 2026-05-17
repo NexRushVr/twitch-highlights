@@ -23,11 +23,17 @@
   "llm_timeout_seconds": 300,
 
   "clip_mode": "all",
+  "trigger_phrase": "clip it",
+  "phrase_pre_seconds": 60.0,
+  "phrase_post_seconds": 60.0,
   "max_clips": 10,
   "min_clip_duration": 8,
   "max_clip_duration": 45,
   "clip_padding_seconds": 3,
 
   "output_dir": "./clips",
-  "burn_subtitles": true
+  "burn_subtitles": true,
+
+  "verbose": false,
+  "runtime_estimate_factor": 0.0
 }

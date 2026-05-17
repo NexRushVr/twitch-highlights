@@ -231,6 +231,93 @@ def test_run_local_source_derives_wav_under_download_dir(tmp_path, sample_segmen
 
 
 # ---------------------------------------------------------------------------
+# Phrase mode
+# ---------------------------------------------------------------------------
+
+def test_run_phrase_mode_does_not_truncate_to_max_clips(tmp_path, sample_segments):
+    """Phrase mode is 'catch every trigger' — max_clips must NOT cap it."""
+    cfg = {
+        "source_type": "twitch",
+        "twitch_vod_url": "https://www.twitch.tv/videos/123",
+        "quality": "720p",
+        "download_dir": str(tmp_path / "downloads"),
+        "whisper_model": "base",
+        "whisper_device": "cpu",
+        "whisper_language": "en",
+        "llm_backend": "ollama",
+        "ollama_model": "mistral",
+        "clip_mode": "phrase",
+        "trigger_phrase": "clip it",
+        "max_clips": 2,                       # deliberately small
+        "clip_padding_seconds": 3,
+        "output_dir": str(tmp_path / "clips"),
+        "burn_subtitles": False,
+    }
+    # 6 phrase hits even though max_clips=2.
+    many = [
+        {"start": float(i * 100), "end": float(i * 100 + 20),
+         "reason": "clip_it", "score": 1.0, "description": "clip it"}
+        for i in range(6)
+    ]
+    clip_file = str(tmp_path / "clips" / "clip_001_clip_it.mp4")
+    with patch("pipeline.download_twitch_vod", return_value=(str(tmp_path / "v.mp4"), "2026-05-13")), \
+         patch("pipeline.apply_time_window", side_effect=lambda v, *a, **kw: v), \
+         patch("pipeline._estimate_total_runtime", return_value=None), \
+         patch("pipeline.extract_audio", return_value=str(tmp_path / "v.wav")), \
+         patch("pipeline.transcribe", return_value=sample_segments), \
+         patch("pipeline.select_highlights", return_value=many) as mock_sel, \
+         patch("pipeline.get_audio_peaks", return_value=[]), \
+         patch("pipeline.batch_extract",
+               side_effect=lambda vp, clips, c, progress=None: [{"file": clip_file, "meta": cl} for cl in clips]) as mock_extract:
+        run(cfg)
+
+    # select_highlights got the phrase config; batch_extract received all 6,
+    # not just max_clips=2.
+    assert mock_sel.called
+    extracted_clips = mock_extract.call_args[0][1]
+    assert len(extracted_clips) == 6
+
+
+def test_run_reaction_mode_still_truncates_to_max_clips(tmp_path, sample_segments):
+    """Sanity counter-test: non-phrase modes still honor max_clips."""
+    cfg = {
+        "source_type": "twitch",
+        "twitch_vod_url": "https://www.twitch.tv/videos/123",
+        "quality": "720p",
+        "download_dir": str(tmp_path / "downloads"),
+        "whisper_model": "base",
+        "whisper_device": "cpu",
+        "whisper_language": "en",
+        "llm_backend": "ollama",
+        "ollama_model": "mistral",
+        "clip_mode": "reaction",
+        "max_clips": 2,
+        "clip_padding_seconds": 3,
+        "output_dir": str(tmp_path / "clips"),
+        "burn_subtitles": False,
+    }
+    many = [
+        {"start": float(i * 100), "end": float(i * 100 + 20),
+         "reason": "hype", "score": 1.0 - i * 0.1, "description": "x"}
+        for i in range(6)
+    ]
+    clip_file = str(tmp_path / "clips" / "clip_001_hype.mp4")
+    with patch("pipeline.download_twitch_vod", return_value=(str(tmp_path / "v.mp4"), "2026-05-13")), \
+         patch("pipeline.apply_time_window", side_effect=lambda v, *a, **kw: v), \
+         patch("pipeline._estimate_total_runtime", return_value=None), \
+         patch("pipeline.extract_audio", return_value=str(tmp_path / "v.wav")), \
+         patch("pipeline.transcribe", return_value=sample_segments), \
+         patch("pipeline.select_highlights", return_value=many), \
+         patch("pipeline.get_audio_peaks", return_value=[]), \
+         patch("pipeline.batch_extract",
+               side_effect=lambda vp, clips, c, progress=None: [{"file": clip_file, "meta": cl} for cl in clips]) as mock_extract:
+        run(cfg)
+
+    extracted_clips = mock_extract.call_args[0][1]
+    assert len(extracted_clips) == 2
+
+
+# ---------------------------------------------------------------------------
 # Time window
 # ---------------------------------------------------------------------------
 

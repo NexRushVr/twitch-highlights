@@ -138,3 +138,52 @@ def test_progress_iter_quiet_yields_same_items():
 def test_default_phase_weights_sum_to_one():
     total = sum(DEFAULT_PHASE_WEIGHTS.values())
     assert 0.99 <= total <= 1.01
+
+
+# ---------------------------------------------------------------------------
+# Heartbeat spinner gating
+# ---------------------------------------------------------------------------
+
+def test_spinner_disabled_in_verbose_mode():
+    p = Progress(verbose=True)
+    assert p._spinner_enabled() is False
+
+
+def test_spinner_disabled_when_stdout_not_a_tty(capsys):
+    # pytest's captured stdout is not a tty → spinner must stay off so logs
+    # don't fill with carriage-return frames.
+    p = Progress(verbose=False)
+    assert p._spinner_enabled() is False
+
+
+def test_spinner_enabled_when_tty(monkeypatch):
+    p = Progress(verbose=False)
+
+    class _FakeTTY:
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr("modules.progress.sys.stdout", _FakeTTY())
+    assert p._spinner_enabled() is True
+
+
+def test_phase_runs_without_spinner_and_still_prints(capsys, monkeypatch):
+    """A phase with a forced TTY + spinner=False must skip the heartbeat
+    thread entirely but still emit header/footer."""
+    started = {"count": 0}
+
+    class _Boom(Exception):
+        pass
+
+    def _no_start(self):
+        started["count"] += 1
+
+    monkeypatch.setattr("modules.progress._Heartbeat.start", _no_start)
+
+    p = Progress(verbose=False)
+    with p.phase("source", "Resolving source", spinner=False):
+        pass
+    out = capsys.readouterr().out
+    assert "[1/7] Resolving source..." in out
+    assert "done in" in out
+    assert started["count"] == 0  # heartbeat never started

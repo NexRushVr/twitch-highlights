@@ -28,6 +28,9 @@ Time-based progress is clamped to 99% until the pipeline finishes, so a
 faster-than-expected run doesn't oscillate past 100% mid-phase.
 """
 
+import itertools
+import sys
+import threading
 import time
 from contextlib import contextmanager
 
@@ -58,6 +61,50 @@ def fmt_seconds(seconds: float) -> str:
     if h:
         return f"{h:d}:{m:02d}:{sec:02d}"
     return f"{m:d}:{sec:02d}"
+
+
+class _Heartbeat:
+    """Background ticker that rewrites a single line every second so a long,
+    output-silent phase (a multi-minute download, ffmpeg audio extract, etc.)
+    visibly counts up instead of looking frozen.
+
+    Only used on a real TTY — in pipes / CI / pytest it's a no-op so logs
+    don't fill with carriage-return spam and tests stay deterministic.
+    """
+
+    _FRAMES = "|/-\\"
+    _WIDTH = 78
+
+    def __init__(self, label: str, progress: "Progress"):
+        self._label = label
+        self._progress = progress
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=2.0)
+        # Wipe the spinner line so the phase footer prints cleanly.
+        sys.stdout.write("\r" + " " * self._WIDTH + "\r")
+        sys.stdout.flush()
+
+    def _run(self) -> None:
+        start = time.monotonic()
+        for frame in itertools.cycle(self._FRAMES):
+            # wait() returns True the instant stop() is called, so the phase
+            # never blocks waiting on a full tick to finish.
+            if self._stop.wait(1.0):
+                return
+            elapsed = time.monotonic() - start
+            line = (
+                f"   {frame} {self._label} — {fmt_seconds(elapsed)} elapsed"
+                f"{self._progress._eta_suffix()}"
+            )
+            sys.stdout.write("\r" + line[: self._WIDTH].ljust(self._WIDTH))
+            sys.stdout.flush()
 
 
 class Progress:
@@ -98,9 +145,25 @@ class Progress:
         remaining = max(0.0, self._estimated_total - elapsed)
         return f", ~{fmt_seconds(remaining)} left of ~{fmt_seconds(self._estimated_total)}"
 
+    def _spinner_enabled(self) -> bool:
+        """Heartbeat only on an interactive TTY in compact mode — never in
+        verbose (real logs already scroll) or non-TTY (pipes/CI/pytest)."""
+        if self.verbose:
+            return False
+        try:
+            return bool(sys.stdout.isatty())
+        except (AttributeError, ValueError):
+            return False
+
     @contextmanager
-    def phase(self, key: str, label: str):
-        """Begin a named phase. Prints a start header and a done/elapsed line."""
+    def phase(self, key: str, label: str, spinner: bool = True):
+        """Begin a named phase. Prints a start header and a done/elapsed line.
+
+        `spinner=True` runs a live elapsed-time ticker for the duration of the
+        phase (compact mode + TTY only). Pass `spinner=False` for phases that
+        already render their own live output (a tqdm bar via `iter`, or
+        Whisper's built-in progress bar) so the two don't fight for the line.
+        """
         self._step_count += 1
         start = time.monotonic()
         overall_before = self._overall_pct()
@@ -110,9 +173,15 @@ class Progress:
             f"(overall {overall_before}%{eta})",
             flush=True,
         )
+        hb = None
+        if spinner and self._spinner_enabled():
+            hb = _Heartbeat(label, self)
+            hb.start()
         try:
             yield self
         finally:
+            if hb is not None:
+                hb.stop()
             elapsed = time.monotonic() - start
             self._completed_weight = min(
                 1.0, self._completed_weight + self.weights.get(key, 0.0)

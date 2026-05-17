@@ -34,11 +34,18 @@ DEFAULT_CONFIG = {
     "llm_timeout_seconds": 300,  # per-chunk timeout — guards against hung reasoning models
 
     # Clip Detection
-    "clip_mode": "reaction",          # "reaction" | "dance" | "hype" | "all"
+    "clip_mode": "reaction",          # "reaction" | "dance" | "hype" | "all" | "phrase"
     "max_clips": 10,
     "min_clip_duration": 8,
     "max_clip_duration": 45,
     "clip_padding_seconds": 3,
+
+    # Phrase mode — when clip_mode == "phrase", skip the LLM and cut a window
+    # around every spot where the streamer says `trigger_phrase`. Lets you
+    # "voice-mark" clips mid-stream instead of pressing hotkeys.
+    "trigger_phrase": "clip it",      # case-insensitive substring match
+    "phrase_pre_seconds": 60.0,       # seconds of context BEFORE the phrase
+    "phrase_post_seconds": 60.0,      # seconds of context AFTER the phrase
 
     # Output
     "output_dir": "./clips",
