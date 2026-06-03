@@ -141,6 +141,29 @@ def _build_system_prompt(config: dict) -> str:
     return f"{base}\n\n{addendum}".strip()
 
 
+# JSON schema for the clip list, passed to Ollama's `format` param so the model
+# is constrained at the token level to emit a valid top-level ARRAY of clip
+# objects. This removes the dependence on regex-scraping JSON out of free-form
+# prose (the old failure mode that made stricter models like gemma3 return
+# unparseable output). NOTE: do not pass the bare string "json" instead — that
+# lets the model wrap the array in an object (e.g. {"clips":[...]}), which the
+# parser below drops to zero clips.
+_CLIP_LIST_SCHEMA = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "start": {"type": "number"},
+            "end": {"type": "number"},
+            "reason": {"type": "string"},
+            "score": {"type": "number"},
+            "description": {"type": "string"},
+        },
+        "required": ["start", "end", "reason", "score", "description"],
+    },
+}
+
+
 def _call_ollama(system_prompt: str, user_message: str, config: dict) -> str:
     if ollama is None:
         raise ImportError("ollama is required: pip install ollama")
@@ -152,6 +175,7 @@ def _call_ollama(system_prompt: str, user_message: str, config: dict) -> str:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"Transcript:\n{user_message}"},
         ],
+        format=_CLIP_LIST_SCHEMA,
     )["message"]["content"])
 
 
@@ -178,6 +202,135 @@ def _sanitize_reason(phrase: str) -> str:
     """Turn a trigger phrase into a filename-safe clip reason tag."""
     tag = re.sub(r"[^a-z0-9]+", "_", phrase.strip().lower()).strip("_")
     return tag or "phrase"
+
+
+def detect_content_type(segments: list) -> tuple[str, float]:
+    """Classify a transcript as "music", "mixed", or "commentary" using
+    Whisper's per-segment `no_speech_prob`. Music-only streams (mute VRChat
+    dancers, instrumental DJ sets) score high because Whisper can tell the
+    audio is not speech; talking streamers score near zero. Returns the label
+    and the duration-weighted mean for logging.
+
+    Thresholds were picked from the dataset Whisper publishes — 0.4 is the
+    same cutoff Whisper itself uses to drop "no speech" segments.
+    """
+    total_dur = 0.0
+    weighted = 0.0
+    for s in segments:
+        try:
+            d = max(0.0, float(s.get("end", 0)) - float(s.get("start", 0)))
+        except (TypeError, ValueError):
+            continue
+        total_dur += d
+        weighted += d * float(s.get("no_speech_prob", 0.0))
+
+    if total_dur <= 0:
+        return "unknown", 0.0
+    mean = weighted / total_dur
+    if mean >= 0.4:
+        return "music", mean
+    if mean >= 0.2:
+        return "mixed", mean
+    return "commentary", mean
+
+
+def select_by_music_peaks(wav_path: str, config: dict) -> list:
+    """Build clip candidates from musical onsets (beat drops, song transitions)
+    using librosa. Used when the transcript is mostly lyrics/music — the LLM
+    has nothing to work with, but the audio waveform does.
+
+    Onsets are detected globally, ranked by onset-envelope strength, then
+    greedily picked with a minimum gap so two adjacent drops don't both make
+    the cut. Each onset becomes a [-pre, +post] window.
+    """
+    try:
+        import librosa
+        import numpy as np
+    except ImportError:
+        raise ImportError("librosa is required for music-peak selection: pip install librosa")
+
+    max_clips = int(config.get("max_clips", 10))
+    pre = float(config.get("music_peak_pre_seconds", 5.0))
+    post = float(config.get("music_peak_post_seconds", 12.0))
+    min_gap = float(config.get("music_peak_min_gap_seconds", 20.0))
+
+    y, sr = librosa.load(wav_path, sr=None)
+    onset_env = librosa.onset.onset_strength(y=y, sr=sr)
+    onset_frames = librosa.onset.onset_detect(onset_envelope=onset_env, sr=sr)
+    if len(onset_frames) == 0:
+        return []
+
+    strengths = onset_env[onset_frames]
+    onset_times = librosa.frames_to_time(onset_frames, sr=sr)
+
+    # Rank by strength descending, then greedily accept onsets that are
+    # `min_gap` seconds away from every onset already kept. This spreads
+    # picks across the whole VOD instead of clustering them in one song.
+    order = np.argsort(strengths)[::-1]
+    duration = float(len(y)) / float(sr)
+    kept_times: list[float] = []
+    kept_strengths: list[float] = []
+    for idx in order:
+        t = float(onset_times[idx])
+        if any(abs(t - k) < min_gap for k in kept_times):
+            continue
+        kept_times.append(t)
+        kept_strengths.append(float(strengths[idx]))
+        if len(kept_times) >= max_clips:
+            break
+
+    if not kept_strengths:
+        return []
+    max_strength = max(kept_strengths) or 1.0
+    clips: list = []
+    for t, s in zip(kept_times, kept_strengths):
+        clips.append({
+            "start": max(0.0, t - pre),
+            "end": min(duration, t + post),
+            "reason": "music_peak",
+            "score": round(0.5 + 0.5 * (s / max_strength), 3),  # 0.5..1.0
+            "description": f"Musical onset at {t:.1f}s (strength {s:.1f})",
+        })
+
+    clips.sort(key=lambda c: c["start"])
+    return deduplicate_clips(clips)
+
+
+def top_up_with_music_peaks(existing: list, wav_path: str, config: dict, target_count: int) -> list:
+    """Pad `existing` clips with music-peak candidates until length >= target_count.
+    Only adds peaks that don't overlap existing clips. Used as a floor when the
+    LLM returns fewer clips than `min_clips`.
+    """
+    if len(existing) >= target_count:
+        return existing
+    fill_config = dict(config)
+    # Ask for plenty of candidates so we can filter overlaps with existing picks.
+    fill_config["max_clips"] = max(target_count * 3, 30)
+    # Best-effort floor: a missing/unreadable WAV or a missing librosa must not
+    # crash an otherwise-successful run. Topping up is a nicety, so degrade to
+    # "return what the LLM gave us" instead of raising. (clip_mode="music" calls
+    # select_by_music_peaks directly and keeps its strict error there.)
+    try:
+        candidates = select_by_music_peaks(wav_path, fill_config)
+    except Exception as e:
+        print(f"    music-peak top-up unavailable ({type(e).__name__}: {e}) — keeping {len(existing)} clips")
+        return existing
+    if not candidates:
+        return existing
+    merged = list(existing)
+    for c in candidates:
+        if len(merged) >= target_count:
+            break
+        overlap = False
+        for k in merged:
+            o_start = max(c["start"], k["start"])
+            o_end = min(c["end"], k["end"])
+            if o_end - o_start > 0:
+                overlap = True
+                break
+        if not overlap:
+            merged.append(c)
+    return merged
 
 
 def select_by_phrase(segments: list, config: dict) -> list:
@@ -220,8 +373,12 @@ def select_by_phrase(segments: list, config: dict) -> list:
     return deduplicate_clips(hits)
 
 
-def select_highlights(segments: list, config: dict, progress=None) -> list:
+def select_highlights(segments: list, config: dict, wav_path: str | None = None, progress=None) -> list:
     """Run the LLM clip-selection prompt over the transcript.
+
+    `wav_path` is required when `clip_mode == "music"` or when auto-detection
+    routes a mostly-music VOD to peak-based selection (mute VRChat dancers,
+    DJ sets — anywhere the transcript is just lyrics).
 
     `progress` is an optional `modules.progress.Progress` instance; if given,
     chunk iteration is wrapped in a tqdm bar and per-chunk console prints are
@@ -230,6 +387,22 @@ def select_highlights(segments: list, config: dict, progress=None) -> list:
     """
     if config.get("clip_mode") == "phrase":
         return select_by_phrase(segments, config)
+
+    # Music mode: skip the LLM entirely and clip around audio onsets.
+    if config.get("clip_mode") == "music":
+        if not wav_path:
+            raise ValueError("clip_mode='music' requires wav_path")
+        return select_by_music_peaks(wav_path, config)
+
+    # Auto-route: if Whisper says the audio is mostly not-speech (lyrics or
+    # silence dominate), use the music-peak path instead of pumping song
+    # lyrics through the LLM.
+    label, score = detect_content_type(segments)
+    config["_content_label"] = label
+    config["_content_score"] = score
+    if label == "music" and wav_path:
+        print(f"    Auto-detected music content (no_speech_prob={score:.2f}) — using audio-peak selection")
+        return select_by_music_peaks(wav_path, config)
 
     system_prompt = _build_system_prompt(config)
     chunks = chunk_transcript(segments, max_chars=6000)

@@ -15,7 +15,7 @@ from modules.source_resolver import (
 )
 from modules.audio_extractor import extract_audio, get_audio_peaks
 from modules.transcriber import transcribe
-from modules.highlight_selector import select_highlights
+from modules.highlight_selector import select_highlights, top_up_with_music_peaks
 from modules.clip_extractor import batch_extract
 from modules.subtitle_burner import caption_clip
 from modules.progress import Progress, fmt_seconds
@@ -33,6 +33,75 @@ def _streamer_subdir(cfg: dict) -> str:
 def _today_iso() -> str:
     from datetime import datetime, timezone
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _file_size_mb(path: str) -> float:
+    """Size of a file in MB. 0.0 if missing — caller can sum freely."""
+    try:
+        return os.path.getsize(path) / (1024 * 1024)
+    except OSError:
+        return 0.0
+
+
+def _is_inside(path: str, parent: str) -> bool:
+    """True if `path` resolves under `parent` (used to gate cleanup of
+    user-owned local sources — we only delete files we created)."""
+    try:
+        abs_path = os.path.realpath(path)
+        abs_parent = os.path.realpath(parent)
+    except OSError:
+        return False
+    rel = os.path.relpath(abs_path, abs_parent)
+    return not rel.startswith("..") and not os.path.isabs(rel)
+
+
+def _dir_size_mb(path: str) -> float:
+    """Recursive size of `path` in MB. 0.0 if missing."""
+    total = 0
+    try:
+        for root, _, files in os.walk(path):
+            for f in files:
+                try:
+                    total += os.path.getsize(os.path.join(root, f))
+                except OSError:
+                    pass
+    except OSError:
+        return 0.0
+    return total / (1024 * 1024)
+
+
+def _cleanup_source_artifacts(
+    original_video_path: str,
+    windowed_video_path: str | None,
+    wav_path: str,
+    download_dir: str,
+) -> float:
+    """Delete downloaded VOD, windowed trim, and WAV after a successful run.
+
+    Returns total MB freed. Skips any path that lives outside `download_dir`
+    so a user's local source file is never touched. Keeps the transcript JSON
+    so a later `--force` re-run can skip Whisper after re-downloading.
+    """
+    candidates = []
+    if windowed_video_path and windowed_video_path != original_video_path:
+        candidates.append(windowed_video_path)
+    candidates.append(original_video_path)
+    candidates.append(wav_path)
+
+    freed = 0.0
+    for path in candidates:
+        if not path or not os.path.exists(path):
+            continue
+        if not _is_inside(path, download_dir):
+            # User-owned (e.g. source_type=local .mp4 outside download_dir).
+            continue
+        size = _file_size_mb(path)
+        try:
+            os.remove(path)
+            freed += size
+        except OSError as e:
+            print(f"    cleanup: could not remove {path}: {e}")
+    return freed
 
 
 def _estimate_total_runtime(video_path: str, cfg: dict) -> float | None:
@@ -109,6 +178,10 @@ def run(cfg: dict = None) -> list:
                 print(f"    Local source: {video_path}  (vod_date={vod_date})")
         else:
             raise ValueError(f"Unknown source_type: '{source}'")
+
+        # Capture the source path *before* any window trim — cleanup needs to
+        # delete both the original download and any windowed derivative.
+        original_video_path = video_path
 
         # Optional time window — trim the source to [start_time, end_time] before
         # any downstream work. The whole pipeline then sees a shorter video and
@@ -191,18 +264,20 @@ def run(cfg: dict = None) -> list:
             if verbose:
                 print(f"    {len(segments)} segments transcribed")
 
-    # Step 4: Clip selection (LLM, or transcript phrase scan)
+    # Step 4: Clip selection (LLM, or transcript phrase scan, or music peaks)
     # spinner=False: select_highlights drives its own tqdm bar via progress.iter.
     if cfg.get("clip_mode") == "phrase":
         sel_label = f"Scanning transcript for '{cfg.get('trigger_phrase', 'clip it')}'"
+    elif cfg.get("clip_mode") == "music":
+        sel_label = "Detecting musical onsets"
     else:
         sel_label = "LLM highlight selection"
     with progress.phase("llm", sel_label, spinner=False):
-        clips = select_highlights(segments, cfg, progress=progress)
+        clips = select_highlights(segments, cfg, wav_path=wav_path, progress=progress)
         if verbose:
             print(f"    {len(clips)} clip candidates identified")
 
-    # Step 5: Audio peak cross-reference
+    # Step 5: Audio peak cross-reference + min_clips top-up
     with progress.phase("peaks", "Cross-referencing audio peaks"):
         peaks = get_audio_peaks(wav_path)
         for clip in clips:
@@ -210,9 +285,24 @@ def run(cfg: dict = None) -> list:
                 if peak["start"] <= clip["start"] <= peak["end"]:
                     clip["score"] = min(1.0, clip.get("score", 0) + 0.1)
         clips.sort(key=lambda x: x.get("score", 0), reverse=True)
-        # Phrase mode is "catch every time I said the trigger" — don't truncate.
+        # Phrase mode is "catch every time I said the trigger" — don't truncate
+        # or top up; the whole point is fidelity to the streamer's marks.
         if cfg.get("clip_mode") != "phrase":
-            clips = clips[: cfg["max_clips"]]
+            max_clips = int(cfg["max_clips"])
+            min_clips_cfg = int(cfg.get("min_clips") or 0)
+            min_clips = min_clips_cfg if min_clips_cfg > 0 else max(1, max_clips // 2)
+            min_clips = min(min_clips, max_clips)
+            if len(clips) < min_clips and cfg.get("clip_mode") != "music":
+                # LLM under-delivered: top up with musical onsets so the user
+                # gets at least `min_clips`. Music mode already drew from
+                # peaks, so topping up there would be redundant.
+                before = len(clips)
+                clips = top_up_with_music_peaks(clips, wav_path, cfg, target_count=min_clips)
+                added = len(clips) - before
+                if added > 0:
+                    print(f"    LLM returned {before} clips (<{min_clips} floor) — added {added} music-peak candidates")
+                clips.sort(key=lambda x: x.get("score", 0), reverse=True)
+            clips = clips[: max_clips]
 
     # Step 6: Extract clips
     # spinner=False: batch_extract drives its own per-clip tqdm bar.
@@ -244,7 +334,23 @@ def run(cfg: dict = None) -> list:
     with open(manifest_path, "w") as f:
         json.dump(extracted, f, indent=2)
 
-    print(f"\nDone. {len(extracted)} clips -> {cfg['output_dir']}")
+    # Step 8: Reclaim disk — delete the multi-GB VOD + WAV now that clips are
+    # produced. Transcript JSON stays (small + cheap re-run if --force later).
+    # Manifest cache-hit path returned earlier, so we only get here on a real
+    # run that actually produced clips.
+    if cfg.get("cleanup_source", True):
+        freed_mb = _cleanup_source_artifacts(
+            original_video_path,
+            video_path if windowed else None,
+            wav_path,
+            cfg["download_dir"],
+        )
+        if freed_mb > 0:
+            print(f"   Cleaned up source files: freed {freed_mb:.1f} MB "
+                  f"(pass --keep-vod to retain)")
+
+    clips_dir_mb = _dir_size_mb(cfg["output_dir"])
+    print(f"\nDone. {len(extracted)} clips ({clips_dir_mb:.1f} MB) -> {cfg['output_dir']}")
     print(f"   Manifest: {manifest_path}")
     print(f"   Total time: {fmt_seconds(progress.total_elapsed())}")
     return extracted
@@ -259,7 +365,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--channel", help="vodvod.top or kick.com channel handle")
     p.add_argument("--start-time", help="Trim the source to start at this point (HH:MM:SS, MM:SS, or seconds)")
     p.add_argument("--end-time", help="Trim the source to end at this point (HH:MM:SS, MM:SS, or seconds)")
-    p.add_argument("--clip-mode", choices=["reaction", "dance", "hype", "all", "phrase"])
+    p.add_argument("--clip-mode", choices=["reaction", "dance", "hype", "all", "phrase", "music"])
     p.add_argument("--trigger-phrase",
                    help="Phrase that marks a clip when clip-mode=phrase (default: 'clip it')")
     p.add_argument("--phrase-pre", type=float,
@@ -267,10 +373,16 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--phrase-post", type=float,
                    help="Seconds of context after the trigger phrase (default: 60)")
     p.add_argument("--max-clips", type=int)
+    p.add_argument("--min-clips", type=int,
+                   help="Floor on returned clips. Defaults to max_clips // 2. "
+                        "If the LLM returns fewer, tops up from musical onsets.")
     p.add_argument("--llm-backend", choices=["ollama", "openai"])
     p.add_argument("--model", help="Ollama or OpenAI model name")
     p.add_argument("--force", action="store_true",
                    help="Regenerate clips even if a manifest already exists for this VOD-date")
+    p.add_argument("--keep-vod", dest="keep_vod", action="store_true",
+                   help="Keep the downloaded VOD + WAV after a successful run "
+                        "(default: delete to reclaim disk; transcript JSON is always kept)")
     p.add_argument("--verbose", action="store_true",
                    help="Show full subprocess output and per-chunk LLM logs (default: compact progress display)")
     return p
@@ -310,6 +422,8 @@ if __name__ == "__main__":
         cfg["phrase_post_seconds"] = args.phrase_post
     if args.max_clips:
         cfg["max_clips"] = args.max_clips
+    if args.min_clips is not None:
+        cfg["min_clips"] = args.min_clips
     if args.llm_backend:
         cfg["llm_backend"] = args.llm_backend
     if args.model:
@@ -317,6 +431,8 @@ if __name__ == "__main__":
         cfg[key] = args.model
     if args.force:
         cfg["force"] = True
+    if args.keep_vod:
+        cfg["cleanup_source"] = False
     if args.verbose:
         cfg["verbose"] = True
 

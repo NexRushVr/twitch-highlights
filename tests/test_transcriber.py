@@ -25,8 +25,8 @@ def test_transcribe_returns_segment_list():
         result = transcribe("/tmp/audio.wav", "base", "cpu")
 
     assert len(result) == 2
-    assert result[0] == {"start": 0.0, "end": 5.0, "text": "Hello world", "confidence": -0.5}
-    assert result[1] == {"start": 5.0, "end": 10.0, "text": "How are you", "confidence": -0.4}
+    assert result[0] == {"start": 0.0, "end": 5.0, "text": "Hello world", "confidence": -0.5, "no_speech_prob": 0.0}
+    assert result[1] == {"start": 5.0, "end": 10.0, "text": "How are you", "confidence": -0.4, "no_speech_prob": 0.0}
 
 
 def test_transcribe_strips_whitespace_from_text():

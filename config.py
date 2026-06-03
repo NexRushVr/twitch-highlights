@@ -28,17 +28,28 @@ DEFAULT_CONFIG = {
 
     # LLM
     "llm_backend": "ollama",          # "ollama" | "openai"
-    "ollama_model": "qwen2.5:14b",
+    "ollama_model": "gpt-oss:20b",
     "openai_model": "gpt-4o-mini",
     "openai_api_key": "",
     "llm_timeout_seconds": 300,  # per-chunk timeout — guards against hung reasoning models
 
     # Clip Detection
-    "clip_mode": "reaction",          # "reaction" | "dance" | "hype" | "all" | "phrase"
+    "clip_mode": "reaction",          # "reaction" | "dance" | "hype" | "all" | "phrase" | "music"
     "max_clips": 10,
+    # Floor on returned clips. 0 = auto = max_clips // 2. If the chosen
+    # selector returns fewer than this, the pipeline tops up from music-peak
+    # candidates so a quiet-LLM-day still produces a usable reel.
+    "min_clips": 0,
     "min_clip_duration": 8,
     "max_clip_duration": 45,
     "clip_padding_seconds": 3,
+
+    # Music mode (also used for top-up when min_clips isn't met) — window
+    # built around each detected musical onset and the minimum gap between
+    # successive picks so two drops in the same chorus don't both qualify.
+    "music_peak_pre_seconds": 5.0,
+    "music_peak_post_seconds": 12.0,
+    "music_peak_min_gap_seconds": 20.0,
 
     # Phrase mode — when clip_mode == "phrase", skip the LLM and cut a window
     # around every spot where the streamer says `trigger_phrase`. Lets you
@@ -50,6 +61,13 @@ DEFAULT_CONFIG = {
     # Output
     "output_dir": "./clips",
     "burn_subtitles": True,
+
+    # Disk cleanup — after a successful run, delete the downloaded VOD, any
+    # windowed trim, and the derived WAV to reclaim multi-GB of space. The
+    # transcript JSON is kept (it's small and lets re-runs skip Whisper if you
+    # later re-download). Never touches a user's local source file. Skipped
+    # when the manifest skip-guard fires (nothing new was produced).
+    "cleanup_source": True,
 
     # Display
     "verbose": False,                 # show full subprocess / per-chunk log spam

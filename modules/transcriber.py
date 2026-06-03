@@ -23,6 +23,7 @@ def transcribe(audio_path: str, model_size: str = "large-v3", device: str = "cud
             "end": round(seg["end"], 2),
             "text": seg["text"].strip(),
             "confidence": round(seg.get("avg_logprob", 0.0), 3),
+            "no_speech_prob": round(float(seg.get("no_speech_prob", 0.0)), 3),
         }
         for seg in segments
     ]

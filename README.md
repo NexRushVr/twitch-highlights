@@ -28,7 +28,7 @@ cd twitch-highlights
 python -m venv .venv && . .venv/Scripts/Activate.ps1     # macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
 playwright install chromium
-ollama pull qwen2.5:14b
+ollama pull gpt-oss:20b
 
 # Cut highlights from the most recent Kick stream by a channel:
 python pipeline.py --source-type kick --channel abehamm --clip-mode all
@@ -84,10 +84,10 @@ Verify with `ffmpeg -version`.
 Install from [ollama.com](https://ollama.com), make sure the daemon is running (`ollama serve` or the tray app), then pull the default model:
 
 ```bash
-ollama pull qwen2.5:14b
+ollama pull gpt-oss:20b
 ```
 
-`qwen2.5:14b` is ~9 GB. If you have <16 GB RAM/VRAM, pull a smaller model like `llama3.1:8b` and set `--model llama3.1:8b` (or `ollama_model` in config).
+`gpt-oss:20b` is ~13 GB and selects noticeably better highlights than the older `qwen2.5:14b` default (it reliably catches comedic/hype peaks the smaller model missed). If you have <16 GB RAM/VRAM, pull a smaller model like `qwen2.5:14b` (~9 GB) or `llama3.1:8b` and set `--model qwen2.5:14b` (or `ollama_model` in config).
 
 ## Install
 
@@ -285,7 +285,7 @@ usage: pipeline.py [-h] [--config CONFIG]
                    [--trigger-phrase TRIGGER_PHRASE]
                    [--phrase-pre PHRASE_PRE] [--phrase-post PHRASE_POST]
                    [--max-clips MAX_CLIPS] [--llm-backend {ollama,openai}]
-                   [--model MODEL] [--force] [--verbose]
+                   [--model MODEL] [--force] [--keep-vod] [--verbose]
 ```
 
 **Expected runtime** (RTX 3090, 4-hour 1080p VOD): ~20–40 min total — most of it Whisper transcription. Output is roughly 10 × 15–45 s mp4s, a few hundred MB total.
@@ -346,8 +346,9 @@ Env-var example: `VOD_CLIP_OLLAMA_MODEL=llama3.1:8b`, `VOD_CLIP_WHISPER_DEVICE=c
 | `whisper_device` | `cuda` | **`cuda` will crash on a CPU-only machine — set `cpu` explicitly if no GPU** |
 | `whisper_model` | `large-v3` | `tiny` \| `base` \| `small` \| `medium` \| `large-v3` |
 | `llm_backend` | `ollama` | `ollama` \| `openai` |
-| `ollama_model` | `qwen2.5:14b` | any model pulled into your local Ollama |
+| `ollama_model` | `gpt-oss:20b` | any model pulled into your local Ollama |
 | `burn_subtitles` | `true` | also produce a `*_captioned.mp4` per clip |
+| `cleanup_source` | `true` | after a successful run, delete the downloaded VOD + any windowed trim + the derived `.wav` to reclaim disk. Transcript JSON is always kept. Pass `--keep-vod` to opt out. User-owned local sources are never deleted. |
 | `verbose` | `false` | stream all subprocess output + per-chunk LLM logs (compact display is the default) |
 | `runtime_estimate_factor` | `0.0` | overall-% predictor; `0.0` = auto (~0.15 for CUDA, ~1.5 for CPU). Set explicitly if your hardware is unusually fast/slow. |
 
@@ -389,7 +390,7 @@ On macOS / Linux, the equivalent is a `cron` entry pointing at `python pipeline.
 | `RuntimeError: CUDA error` / `Torch not compiled with CUDA` | torch CPU wheel installed, or no GPU | Install CUDA torch (see GPU and Whisper setup), or set `whisper_device: "cpu"`. |
 | `whisper.load_model` OOM on GPU | `large-v3` needs ~10 GB VRAM | Use `whisper_model: "medium"` or `"small"`. |
 | `httpx.ConnectError` / `connection refused` to `localhost:11434` | Ollama daemon not running | Launch the Ollama tray app, or run `ollama serve`. |
-| `model "qwen2.5:14b" not found` | Default model not pulled | `ollama pull qwen2.5:14b` (or whatever you set as `ollama_model`). |
+| `model "gpt-oss:20b" not found` | Default model not pulled | `ollama pull gpt-oss:20b` (or whatever you set as `ollama_model`). |
 | `playwright._impl._errors.Error: Executable doesn't exist` | Chromium not downloaded | `playwright install chromium`. |
 | vodvod scraper returns no VOD / wrong page | vodvod.top layout changed (it's a third-party scraper, see Caveats) | Pin to a Twitch VOD URL with `--source-type twitch --url ...` while you wait for a fix. |
 | `yt-dlp: ERROR: Unable to download ... 403` | yt-dlp out of date vs Twitch changes | `pip install -U yt-dlp`. |

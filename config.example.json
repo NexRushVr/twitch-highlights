@@ -17,7 +17,7 @@
   "whisper_language": "en",
 
   "llm_backend": "ollama",
-  "ollama_model": "qwen2.5:14b",
+  "ollama_model": "gpt-oss:20b",
   "openai_model": "gpt-4o-mini",
   "openai_api_key": "",
   "llm_timeout_seconds": 300,
@@ -33,6 +33,7 @@
 
   "output_dir": "./clips",
   "burn_subtitles": true,
+  "cleanup_source": true,
 
   "verbose": false,
   "runtime_estimate_factor": 0.0

@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pipeline import run, _build_arg_parser
+from pipeline import run, _build_arg_parser, _cleanup_source_artifacts, _is_inside
 
 
 # ---------------------------------------------------------------------------
@@ -744,3 +744,228 @@ def test_run_twitch_does_not_namespace(tmp_path, sample_segments, sample_clips):
 
     manifest = os.path.join(cfg["output_dir"], mocks["vod_date"], "clips_manifest.json")
     assert os.path.exists(manifest)
+
+
+# ---------------------------------------------------------------------------
+# Source cleanup (disk reclaim)
+# ---------------------------------------------------------------------------
+
+def test_cleanup_removes_vod_and_wav_in_download_dir(tmp_path):
+    download_dir = tmp_path / "downloads"
+    download_dir.mkdir()
+    vod = download_dir / "2026-05-13.mp4"
+    wav = download_dir / "2026-05-13.wav"
+    vod.write_bytes(b"x" * 1024 * 1024)     # 1 MB
+    wav.write_bytes(b"x" * 512 * 1024)      # 0.5 MB
+
+    freed = _cleanup_source_artifacts(str(vod), None, str(wav), str(download_dir))
+
+    assert not vod.exists()
+    assert not wav.exists()
+    assert freed > 1.0   # at least the VOD's MB
+
+
+def test_cleanup_removes_windowed_trim_too(tmp_path):
+    download_dir = tmp_path / "downloads"
+    download_dir.mkdir()
+    vod = download_dir / "2026-05-13.mp4"
+    trim = download_dir / "2026-05-13_w3600-5400.mp4"
+    wav = download_dir / "2026-05-13_w3600-5400.wav"
+    vod.write_bytes(b"x" * 1024)
+    trim.write_bytes(b"x" * 1024)
+    wav.write_bytes(b"x" * 1024)
+
+    _cleanup_source_artifacts(str(vod), str(trim), str(wav), str(download_dir))
+
+    assert not vod.exists()
+    assert not trim.exists()
+    assert not wav.exists()
+
+
+def test_cleanup_skips_files_outside_download_dir(tmp_path):
+    """User-owned local source (outside download_dir) must never be deleted."""
+    user_dir = tmp_path / "user_videos"
+    user_dir.mkdir()
+    user_mp4 = user_dir / "my_stream.mp4"
+    user_mp4.write_bytes(b"precious")
+
+    download_dir = tmp_path / "downloads"
+    download_dir.mkdir()
+    wav = download_dir / "my_stream.wav"
+    wav.write_bytes(b"derived")
+
+    freed = _cleanup_source_artifacts(str(user_mp4), None, str(wav), str(download_dir))
+
+    assert user_mp4.exists(), "user's source file must not be touched"
+    assert not wav.exists(), "wav (we created it in download_dir) should be deleted"
+    assert freed > 0
+
+
+def test_cleanup_keeps_transcript_json(tmp_path):
+    """Transcript is small and enables fast re-runs — must survive cleanup."""
+    download_dir = tmp_path / "downloads"
+    download_dir.mkdir()
+    vod = download_dir / "2026-05-13.mp4"
+    wav = download_dir / "2026-05-13.wav"
+    transcript = download_dir / "2026-05-13.transcript.json"
+    vod.write_bytes(b"x")
+    wav.write_bytes(b"x")
+    transcript.write_text("[]")
+
+    _cleanup_source_artifacts(str(vod), None, str(wav), str(download_dir))
+
+    assert transcript.exists(), "transcript.json must NOT be deleted by cleanup"
+
+
+def test_cleanup_handles_missing_files(tmp_path):
+    """Cleanup must not crash when an expected file isn't on disk (mock paths,
+    cached-skip paths, etc)."""
+    download_dir = tmp_path / "downloads"
+    download_dir.mkdir()
+    freed = _cleanup_source_artifacts(
+        str(download_dir / "does_not_exist.mp4"),
+        None,
+        str(download_dir / "also_missing.wav"),
+        str(download_dir),
+    )
+    assert freed == 0.0
+
+
+def test_is_inside_detects_path_membership(tmp_path):
+    parent = tmp_path / "downloads"
+    parent.mkdir()
+    inside = parent / "video.mp4"
+    inside.write_bytes(b"x")
+    outside = tmp_path / "elsewhere.mp4"
+    outside.write_bytes(b"x")
+
+    assert _is_inside(str(inside), str(parent))
+    assert not _is_inside(str(outside), str(parent))
+
+
+def test_run_cleans_up_by_default(tmp_path, sample_segments, sample_clips):
+    """End-to-end: a successful run deletes the VOD and WAV it created."""
+    download_dir = tmp_path / "downloads"
+    download_dir.mkdir()
+    # Pre-create the files the mocks "produced" so cleanup has something to delete.
+    vod = download_dir / "video.mp4"
+    wav = download_dir / "video.wav"
+    vod.write_bytes(b"x" * 2048)
+    wav.write_bytes(b"x" * 1024)
+
+    cfg = {
+        "source_type": "twitch",
+        "twitch_vod_url": "https://www.twitch.tv/videos/123",
+        "quality": "720p",
+        "download_dir": str(download_dir),
+        "whisper_model": "base",
+        "whisper_device": "cpu",
+        "whisper_language": "en",
+        "llm_backend": "ollama",
+        "ollama_model": "mistral",
+        "clip_mode": "reaction",
+        "max_clips": 5,
+        "clip_padding_seconds": 3,
+        "output_dir": str(tmp_path / "clips"),
+        "burn_subtitles": False,
+        "cleanup_source": True,
+    }
+
+    clip_file = str(tmp_path / "clips" / "clip_001.mp4")
+    with patch("pipeline.download_twitch_vod", return_value=(str(vod), "2026-04-27")), \
+         patch("pipeline.extract_audio", return_value=str(wav)), \
+         patch("pipeline.transcribe", return_value=sample_segments), \
+         patch("pipeline.select_highlights", return_value=sample_clips[:]), \
+         patch("pipeline.get_audio_peaks", return_value=[]), \
+         patch("pipeline.batch_extract",
+               return_value=[{"file": clip_file, "meta": sample_clips[0]}]):
+        run(cfg)
+
+    assert not vod.exists(), "VOD should be deleted after a successful run"
+    assert not wav.exists(), "WAV should be deleted after a successful run"
+
+
+def test_run_keeps_vod_when_cleanup_disabled(tmp_path, sample_segments, sample_clips):
+    download_dir = tmp_path / "downloads"
+    download_dir.mkdir()
+    vod = download_dir / "video.mp4"
+    wav = download_dir / "video.wav"
+    vod.write_bytes(b"x" * 1024)
+    wav.write_bytes(b"x" * 1024)
+
+    cfg = {
+        "source_type": "twitch",
+        "twitch_vod_url": "https://www.twitch.tv/videos/123",
+        "quality": "720p",
+        "download_dir": str(download_dir),
+        "whisper_model": "base",
+        "whisper_device": "cpu",
+        "whisper_language": "en",
+        "llm_backend": "ollama",
+        "ollama_model": "mistral",
+        "clip_mode": "reaction",
+        "max_clips": 5,
+        "clip_padding_seconds": 3,
+        "output_dir": str(tmp_path / "clips"),
+        "burn_subtitles": False,
+        "cleanup_source": False,   # opt out
+    }
+
+    clip_file = str(tmp_path / "clips" / "clip_001.mp4")
+    with patch("pipeline.download_twitch_vod", return_value=(str(vod), "2026-04-27")), \
+         patch("pipeline.extract_audio", return_value=str(wav)), \
+         patch("pipeline.transcribe", return_value=sample_segments), \
+         patch("pipeline.select_highlights", return_value=sample_clips[:]), \
+         patch("pipeline.get_audio_peaks", return_value=[]), \
+         patch("pipeline.batch_extract",
+               return_value=[{"file": clip_file, "meta": sample_clips[0]}]):
+        run(cfg)
+
+    assert vod.exists()
+    assert wav.exists()
+
+
+def test_run_cleanup_skipped_on_manifest_cache_hit(tmp_path, sample_segments, sample_clips):
+    """Skip-guard returns early — cleanup must not touch the cached VOD."""
+    download_dir = tmp_path / "downloads"
+    download_dir.mkdir()
+    streamer_dir = download_dir / "somestreamer"
+    streamer_dir.mkdir()
+    vod = streamer_dir / "2026-06-01.mp4"
+    vod.write_bytes(b"x" * 1024)
+
+    cfg = {
+        "source_type": "vodvod",
+        "vodvod_channel": "@somestreamer",
+        "quality": "720p",
+        "download_dir": str(download_dir),
+        "whisper_model": "base",
+        "whisper_device": "cpu",
+        "whisper_language": "en",
+        "llm_backend": "ollama",
+        "ollama_model": "mistral",
+        "clip_mode": "all",
+        "max_clips": 5,
+        "clip_padding_seconds": 3,
+        "output_dir": str(tmp_path / "clips"),
+        "cleanup_source": True,
+    }
+    # Seed manifest so the skip-guard fires.
+    output_subdir = tmp_path / "clips" / "somestreamer" / "2026-06-01"
+    output_subdir.mkdir(parents=True, exist_ok=True)
+    (output_subdir / "clips_manifest.json").write_text(
+        json.dumps([{"file": "x.mp4", "meta": {"reason": "hype"}}])
+    )
+
+    with _mock_pipeline(tmp_path, sample_segments, sample_clips, vod_date="2026-06-01"):
+        run(cfg)
+
+    assert vod.exists(), "cached VOD must not be deleted on a skip-guard return"
+
+
+def test_arg_parser_keep_vod_flag():
+    parser = _build_arg_parser()
+    args = parser.parse_args([])
+    assert args.keep_vod is False
+    args = parser.parse_args(["--keep-vod"])
+    assert args.keep_vod is True

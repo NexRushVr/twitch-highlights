@@ -7,6 +7,15 @@ versioning follows [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Automatic source cleanup: after a successful run, the downloaded VOD, any
+  windowed trim, and the derived `.wav` are deleted to reclaim multi-GB of
+  disk. Default is on (`cleanup_source: true`); opt out with `--keep-vod` or
+  set `cleanup_source: false` in config. Transcript JSON is always kept — a
+  later `--force` re-run can re-download the video and skip Whisper. Files
+  outside `download_dir` (user-owned local sources) are never touched.
+  Skipped on the manifest cache-hit path so cached VODs survive no-op runs.
+- Final summary now prints the total output size next to the clip count
+  (`10 clips (234.1 MB) -> clips/...`).
 - `clip_mode=phrase`: skip the LLM and cut a window around every spot the
   streamer says a configurable trigger phrase (`--trigger-phrase`, default
   `clip it`; `--phrase-pre` / `--phrase-post`, default 60s each). Voice-mark
@@ -45,6 +54,31 @@ versioning follows [SemVer](https://semver.org/).
   been moved or shared. Visible in `ffprobe`, mediainfo, VLC's Codec
   Information, and Windows Explorer Properties → Details. Not a visible
   watermark — viewers see no change to the video itself.
+- Automatic content-type routing: transcripts that are mostly non-speech
+  (mute VRChat dancers, instrumental DJ sets — anywhere the "transcript" is
+  just lyrics) are detected via Whisper's per-segment `no_speech_prob` and
+  routed to audio-onset (`librosa`) clip selection instead of feeding song
+  lyrics through the LLM. Talking streams are unaffected. Transcriber output
+  now carries `no_speech_prob` per segment to drive this.
+- `min_clips` floor (config / `--min-clips`; `0` = auto = `max_clips // 2`):
+  if the LLM under-delivers on a quiet day, the reel is topped up with
+  non-overlapping music-peak candidates so a run still yields a usable set.
+  Top-up is best-effort — a missing/unreadable `.wav` or absent `librosa`
+  degrades to "keep what the LLM returned" rather than failing the run.
+
+### Changed
+- Default highlight-selection model is now `gpt-oss:20b` (was `qwen2.5:14b`).
+  In head-to-head tests on real VOD windows it reliably catches comedic/hype
+  peaks the smaller model missed (e.g. an obvious punchline qwen skipped while
+  padding the reel with generic chat-greeting "wholesome" clips), at ~55s vs
+  ~37s per chunk. Override with `--model` / `ollama_model` to keep the old one.
+- Ollama clip selection is now constrained with a JSON **schema** (Ollama's
+  `format` param) so the model emits a valid top-level array at the token
+  level, instead of relying on regex-scraping JSON out of free-form prose.
+  Removes the fragility that made stricter models return unparseable output.
+  (Note: the bare `format="json"` string is intentionally *not* used — it lets
+  the model wrap the array in an object like `{"clips":[...]}`, which the
+  parser drops to zero clips.)
 
 ## [1.0.0] - 2026-05-12
 
