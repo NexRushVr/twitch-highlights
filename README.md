@@ -28,6 +28,7 @@ Not technical? This is the whole thing. You need a Windows PC with an NVIDIA gra
    git clone https://github.com/NexRushVr/twitch-highlights.git "$HOME\twitch-highlights"
    ```
 3. **Install everything else automatically.** Open the new `twitch-highlights` folder (it's in your user folder) and **double-click `install.bat`**. It installs Python, ffmpeg, Ollama, the AI model, and all the rest, and tunes itself to your GPU. First run takes 10–30 min (big downloads). Leave it until it says *Install complete!*
+   - *Want to check your PC first?* Double-click **`check.bat`** — a dry run that reports what's present and what would be installed, **without downloading or changing anything**.
 4. **Make clips.** Double-click **`run.bat`** and answer the questions (which channel, how many clips). When it finishes it offers to open the folder with your clips.
 
 That's it. To make more clips later, just double-click `run.bat` again.

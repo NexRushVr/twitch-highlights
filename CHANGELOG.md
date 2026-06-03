@@ -69,6 +69,9 @@ versioning follows [SemVer](https://semver.org/).
   bootstraps everything (Python, ffmpeg, Ollama via winget; a `.venv` with
   **CUDA** PyTorch; deps; Playwright Chromium; the Ollama model) and writes a
   `config.json` tuned to the detected GPU VRAM. Idempotent and re-runnable.
+  A dry-run mode (`install.ps1 -Check` / `check.bat`) reports what's present and
+  what would be installed, detected VRAM, and the chosen models -- changing
+  nothing -- so a machine can be validated before the large downloads.
 - Interactive launcher `run.bat` / `run.ps1`: prompts for source + clip count
   and runs the pipeline with no command-line knowledge required, then offers to
   open the clips folder. Passes the tuned `config.json` automatically.

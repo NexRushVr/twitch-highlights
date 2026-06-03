@@ -13,7 +13,13 @@
   Easiest way to run this: just double-click install.bat (it handles the
   PowerShell execution-policy prompt for you). Advanced users can run:
     powershell -ExecutionPolicy Bypass -File install.ps1
+
+  Dry run (changes NOTHING - just reports what's present and what would happen):
+    powershell -ExecutionPolicy Bypass -File install.ps1 -Check
+  or double-click check.bat. Use this to validate a machine before the big
+  downloads.
 #>
+param([switch]$Check)
 
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
@@ -26,7 +32,11 @@ function Write-Ok($msg)   { Write-Host "  [OK]   $msg" -ForegroundColor Green }
 function Write-Info($msg) { Write-Host "  ...    $msg" -ForegroundColor Gray }
 function Write-Warn2($msg){ Write-Host "  [WARN] $msg" -ForegroundColor Yellow }
 function Write-Err2($msg) { Write-Host "  [FAIL] $msg" -ForegroundColor Red }
+function Write-Would($msg){ Write-Host "  [WOULD] $msg" -ForegroundColor Cyan }
 
+# ---------------------------------------------------------------------------
+# Shared helpers (defined up front so -Check and the installer share them)
+# ---------------------------------------------------------------------------
 function Test-Cmd($name) {
     $null = Get-Command $name -ErrorAction SilentlyContinue
     return $?
@@ -40,10 +50,141 @@ function Update-SessionPath {
     $env:Path = @($machine, $user | Where-Object { $_ }) -join ";"
 }
 
+# Returns the path to a usable python.exe in the 3.10-3.12 range, or $null.
+# All probes are wrapped so a missing launcher/interpreter never throws under
+# $ErrorActionPreference = 'Stop' -- we just move on to the next candidate.
+function Find-Python {
+    if (Test-Cmd py) {
+        foreach ($ver in @("3.12", "3.11", "3.10")) {
+            try {
+                $out = (& py "-$ver" -c "import sys;print(sys.executable)" 2>$null)
+                if ($LASTEXITCODE -eq 0 -and $out) { return $out.Trim() }
+            } catch { }
+        }
+    }
+    if (Test-Cmd python) {
+        try {
+            $v = (& python -c "import sys;print('%d.%d'%sys.version_info[:2])" 2>$null)
+            if ($v -in @("3.10", "3.11", "3.12")) {
+                return (& python -c "import sys;print(sys.executable)").Trim()
+            }
+        } catch { }
+    }
+    return $null
+}
+
+# Total VRAM in GB of the first NVIDIA GPU, or 0 if none / nvidia-smi missing.
+function Get-VramGB {
+    if (-not (Test-Cmd nvidia-smi)) { return 0 }
+    try {
+        $out = (& nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>$null)
+        if ($LASTEXITCODE -ne 0 -or -not $out) { return 0 }
+        $mb = ($out | Select-Object -First 1).Trim()
+        if ($mb -as [int]) { return [math]::Round([int]$mb / 1024.0, 1) }
+    } catch { }
+    return 0
+}
+
+# SINGLE SOURCE OF TRUTH for model selection. Whisper's CUDA memory can still be
+# resident when Ollama (a separate process) loads the LLM, so the two can stack
+# -- these tiers keep the combined footprint under the card so the whole run
+# stays on-GPU and fast. (16 GB cards report ~15.9 GB, so the top tier triggers
+# on 24 GB cards and 16 GB lands one tier down.) Ollama spills to system RAM
+# rather than fail if a model is a touch too big, so these tune speed not crashes.
+function Get-ModelTier($vram) {
+    if ($vram -ge 22)     { return [pscustomobject]@{ Whisper="large-v3"; Ollama="gpt-oss:20b";  Device="cuda" } }  # 24 GB
+    elseif ($vram -ge 15) { return [pscustomobject]@{ Whisper="medium";   Ollama="qwen2.5:14b"; Device="cuda" } }  # 16 GB
+    elseif ($vram -ge 11) { return [pscustomobject]@{ Whisper="small";    Ollama="qwen2.5:14b"; Device="cuda" } }  # 12 GB
+    elseif ($vram -ge 8)  { return [pscustomobject]@{ Whisper="small";    Ollama="llama3.1:8b"; Device="cuda" } }  # 8-10 GB
+    elseif ($vram -gt 0)  { return [pscustomobject]@{ Whisper="base";     Ollama="llama3.1:8b"; Device="cuda" } }  # weak GPU
+    else                  { return [pscustomobject]@{ Whisper="base";     Ollama="llama3.1:8b"; Device="cpu"  } }  # no GPU
+}
+
+# Is an Ollama model already pulled? (Best-effort; returns $false if Ollama down.)
+function Test-OllamaModel($model) {
+    if (-not (Test-Cmd ollama)) { return $false }
+    try {
+        $list = (& ollama list 2>$null)
+        if ($LASTEXITCODE -ne 0) { return $false }
+        return [bool]($list | Select-String -SimpleMatch $model -Quiet)
+    } catch { return $false }
+}
+
+$venvPy = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
+
+# ===========================================================================
+# DRY RUN (-Check): report only, change nothing, then exit.
+# ===========================================================================
+if ($Check) {
+    Write-Host "============================================================" -ForegroundColor Magenta
+    Write-Host "  twitch-highlights installer - DRY RUN (-Check)" -ForegroundColor Magenta
+    Write-Host "  Nothing will be installed, downloaded, or written." -ForegroundColor Magenta
+    Write-Host "============================================================" -ForegroundColor Magenta
+    $missing = 0
+
+    Write-Step "System tools"
+    if (Test-Cmd winget) { Write-Ok "winget available" }
+    else { Write-Warn2 "winget MISSING - update 'App Installer' from the Microsoft Store (needed to auto-install tools)" }
+
+    if (Test-Cmd git) { Write-Ok "git available" }
+    else { Write-Warn2 "git not found (only needed to clone the repo; would install Git.Git)" }
+
+    $py = Find-Python
+    if ($py) { Write-Ok "Python 3.10-3.12: $py" }
+    else { Write-Warn2 "Python 3.10-3.12 MISSING -> would install Python.Python.3.12"; $missing++ }
+
+    if (Test-Cmd ffmpeg) { Write-Ok "ffmpeg on PATH" }
+    else { Write-Warn2 "ffmpeg MISSING -> would install Gyan.FFmpeg"; $missing++ }
+
+    if (Test-Cmd ollama) {
+        Write-Ok "Ollama installed"
+        & ollama list *> $null
+        if ($LASTEXITCODE -eq 0) { Write-Ok "Ollama daemon responding" }
+        else { Write-Warn2 "Ollama installed but not running (open the Ollama app)" }
+    } else { Write-Warn2 "Ollama MISSING -> would install Ollama.Ollama"; $missing++ }
+
+    Write-Step "Python environment"
+    if (Test-Path $venvPy) {
+        Write-Ok ".venv exists"
+        & $venvPy -c "import whisper, torch" 2>$null
+        if ($?) { Write-Ok "Python dependencies importable" }
+        else { Write-Warn2 "deps not fully installed yet -> would run pip install -r requirements.txt" }
+        $cuda = (& $venvPy -c "import torch;print(torch.cuda.is_available())" 2>$null)
+        if ($cuda -eq "True") { Write-Ok "CUDA PyTorch active" }
+        else { Write-Warn2 "CUDA PyTorch not active -> would install GPU torch (update NVIDIA driver if it stays CPU)" }
+    } else {
+        Write-Would "create .venv, install CUDA PyTorch (~2.5 GB) + deps + Playwright Chromium"
+    }
+
+    Write-Step "GPU and model selection"
+    $vram = Get-VramGB
+    if ($vram -gt 0) { Write-Ok ("Detected ~{0} GB VRAM" -f $vram) }
+    else { Write-Warn2 "No NVIDIA GPU detected via nvidia-smi -> would run on CPU (much slower)" }
+    $tier = Get-ModelTier $vram
+    Write-Info "Would use Whisper '$($tier.Whisper)' + Ollama '$($tier.Ollama)' on '$($tier.Device)'"
+    if (Test-OllamaModel $tier.Ollama) { Write-Ok "Ollama model '$($tier.Ollama)' already pulled" }
+    else { Write-Would "pull Ollama model '$($tier.Ollama)' (one-time download)" }
+
+    Write-Step "Config"
+    if (Test-Path (Join-Path $PSScriptRoot "config.json")) { Write-Ok "config.json exists - would be left untouched" }
+    else { Write-Would "write a tuned config.json" }
+
+    Write-Host ""
+    Write-Host "============================================================" -ForegroundColor Magenta
+    if ($missing -eq 0) { Write-Host "  Dry run OK - this machine looks ready. Run install.bat to finish." -ForegroundColor Green }
+    else { Write-Host "  Dry run found $missing missing tool(s) above - install.bat will fetch them." -ForegroundColor Yellow }
+    Write-Host "============================================================" -ForegroundColor Magenta
+    exit 0
+}
+
+# ===========================================================================
+# REAL INSTALL
+# ===========================================================================
 Write-Host "============================================================" -ForegroundColor Magenta
 Write-Host "  twitch-highlights installer" -ForegroundColor Magenta
 Write-Host "  Windows + NVIDIA GPU setup. This can take 10-30 minutes" -ForegroundColor Magenta
 Write-Host "  the first time (large downloads: PyTorch + the LLM model)." -ForegroundColor Magenta
+Write-Host "  Tip: run a dry run first with  check.bat" -ForegroundColor Magenta
 Write-Host "============================================================" -ForegroundColor Magenta
 
 # ---------------------------------------------------------------------------
@@ -61,7 +202,7 @@ if ($haveWinget) {
 
 # Installs a winget package only if the given command is missing. Returns $true
 # if the command is present (already, or after install).
-function Ensure-Tool($cmd, $wingetId, $label) {
+function Install-ToolIfMissing($cmd, $wingetId, $label) {
     if (Test-Cmd $cmd) { Write-Ok "$label already installed"; return $true }
     if (-not $haveWinget) { Write-Err2 "$label is missing and winget is unavailable. Install it manually."; return $false }
     Write-Info "Installing $label via winget ($wingetId)..."
@@ -76,35 +217,10 @@ function Ensure-Tool($cmd, $wingetId, $label) {
 # 1. Python 3.10-3.12
 # ---------------------------------------------------------------------------
 Write-Step "Checking Python (need 3.10, 3.11, or 3.12)"
-
-# Returns the path to a usable python.exe in the 3.10-3.12 range, or $null.
-# All probes are wrapped so a missing launcher/interpreter never throws under
-# $ErrorActionPreference = 'Stop' -- we just move on to the next candidate.
-function Find-Python {
-    if (Test-Cmd py) {
-        foreach ($ver in @("3.12", "3.11", "3.10")) {
-            try {
-                $out = (& py "-$ver" -c "import sys;print(sys.executable)" 2>$null)
-                if ($LASTEXITCODE -eq 0 -and $out) { return $out.Trim() }
-            } catch { }
-        }
-    }
-    # Fall back to a bare `python` if it reports a supported version.
-    if (Test-Cmd python) {
-        try {
-            $v = (& python -c "import sys;print('%d.%d'%sys.version_info[:2])" 2>$null)
-            if ($v -in @("3.10", "3.11", "3.12")) {
-                return (& python -c "import sys;print(sys.executable)").Trim()
-            }
-        } catch { }
-    }
-    return $null
-}
-
 $python = Find-Python
 if (-not $python) {
     Write-Info "No supported Python found. Installing Python 3.12..."
-    Ensure-Tool "py" "Python.Python.3.12" "Python 3.12" | Out-Null
+    Install-ToolIfMissing "py" "Python.Python.3.12" "Python 3.12" | Out-Null
     Update-SessionPath
     $python = Find-Python
 }
@@ -118,16 +234,15 @@ Write-Ok "Using Python: $python"
 # 2. ffmpeg + Ollama
 # ---------------------------------------------------------------------------
 Write-Step "Checking ffmpeg"
-Ensure-Tool "ffmpeg" "Gyan.FFmpeg" "ffmpeg" | Out-Null
+Install-ToolIfMissing "ffmpeg" "Gyan.FFmpeg" "ffmpeg" | Out-Null
 
 Write-Step "Checking Ollama (local LLM runtime)"
-Ensure-Tool "ollama" "Ollama.Ollama" "Ollama" | Out-Null
+Install-ToolIfMissing "ollama" "Ollama.Ollama" "Ollama" | Out-Null
 
 # ---------------------------------------------------------------------------
 # 3. Virtual environment
 # ---------------------------------------------------------------------------
 Write-Step "Creating Python virtual environment (.venv)"
-$venvPy = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 if (Test-Path $venvPy) {
     Write-Ok ".venv already exists"
 } else {
@@ -151,7 +266,7 @@ if ($cudaOk) {
     Write-Info "Downloading CUDA 12.1 PyTorch wheels (this is the big one ~2.5 GB)..."
     & $venvPy -m pip install torch --index-url https://download.pytorch.org/whl/cu121
     & $venvPy -c "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)" 2>$null
-$cudaOk = ($LASTEXITCODE -eq 0)
+    $cudaOk = ($LASTEXITCODE -eq 0)
     if ($cudaOk) { Write-Ok "CUDA PyTorch installed" }
     else { Write-Warn2 "PyTorch installed but torch.cuda.is_available() is False. Update your NVIDIA driver; the pipeline will fall back to CPU (slow) until then." }
 }
@@ -171,30 +286,11 @@ Write-Ok "Chromium installed"
 # 6. Detect VRAM and pick models that fit, then write a tuned config.json
 # ---------------------------------------------------------------------------
 Write-Step "Detecting GPU and tuning model choices"
-
-function Get-VramGB {
-    if (-not (Test-Cmd nvidia-smi)) { return 0 }
-    $out = (& nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>$null)
-    if ($LASTEXITCODE -ne 0 -or -not $out) { return 0 }
-    $mb = ($out | Select-Object -First 1).Trim()
-    if ($mb -as [int]) { return [math]::Round([int]$mb / 1024.0, 1) }
-    return 0
-}
-
 $vram = Get-VramGB
-# Pick a Whisper + Ollama pair that fits the card. Whisper's CUDA memory can
-# still be resident when Ollama (a separate process) loads the LLM, so the two
-# can stack -- these tiers keep the combined footprint under the card so the
-# whole run stays on-GPU and fast. Bigger cards get the better models.
-# (16 GB cards report ~15.9 GB total, so the top tier triggers on 24 GB cards
-# and 16 GB lands on the next tier down.) Ollama spills to system RAM rather
-# than fail if a model is a touch too big, so these tune for speed, not crashes.
-if ($vram -ge 22)      { $whisperModel = "large-v3"; $ollamaModel = "gpt-oss:20b";  $device = "cuda" }  # 24 GB (3090/4090)
-elseif ($vram -ge 15)  { $whisperModel = "medium";   $ollamaModel = "qwen2.5:14b"; $device = "cuda" }  # 16 GB
-elseif ($vram -ge 11)  { $whisperModel = "small";    $ollamaModel = "qwen2.5:14b"; $device = "cuda" }  # 12 GB
-elseif ($vram -ge 8)   { $whisperModel = "small";    $ollamaModel = "llama3.1:8b"; $device = "cuda" }  # 8-10 GB
-elseif ($vram -gt 0)   { $whisperModel = "base";     $ollamaModel = "llama3.1:8b"; $device = "cuda" }  # weak GPU
-else                   { $whisperModel = "base";     $ollamaModel = "llama3.1:8b"; $device = "cpu"  }   # no GPU
+$tier = Get-ModelTier $vram
+$whisperModel = $tier.Whisper
+$ollamaModel  = $tier.Ollama
+$device       = $tier.Device
 
 if ($vram -gt 0) { Write-Ok ("Detected ~{0} GB VRAM" -f $vram) }
 else { Write-Warn2 "No NVIDIA GPU detected via nvidia-smi. Falling back to CPU (much slower)." }

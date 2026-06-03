@@ -21,6 +21,10 @@ on those, follow the "Manual quickstart" in `README.md`.
 3. From the repo folder, run the installer:
    `powershell -ExecutionPolicy Bypass -File install.ps1`
    (Double-clicking `install.bat` does the same for the user.)
+   To validate a machine first without changing anything, run a dry run:
+   `powershell -ExecutionPolicy Bypass -File install.ps1 -Check` (or `check.bat`).
+   It reports present/missing tools, detected VRAM, the model tier it would pick,
+   and whether the model is already pulled -- downloading/installing nothing.
    It is **idempotent** — safe to re-run. It installs Python/ffmpeg/Ollama via
    winget if missing, creates `.venv`, installs **CUDA** PyTorch *before* the
    other deps (critical — the default PyPI torch is CPU-only), installs the rest,
