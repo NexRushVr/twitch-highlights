@@ -65,6 +65,16 @@ versioning follows [SemVer](https://semver.org/).
   non-overlapping music-peak candidates so a run still yields a usable set.
   Top-up is best-effort — a missing/unreadable `.wav` or absent `librosa`
   degrades to "keep what the LLM returned" rather than failing the run.
+- One-click Windows setup for non-technical users: `install.bat` / `install.ps1`
+  bootstraps everything (Python, ffmpeg, Ollama via winget; a `.venv` with
+  **CUDA** PyTorch; deps; Playwright Chromium; the Ollama model) and writes a
+  `config.json` tuned to the detected GPU VRAM. Idempotent and re-runnable.
+- Interactive launcher `run.bat` / `run.ps1`: prompts for source + clip count
+  and runs the pipeline with no command-line knowledge required, then offers to
+  open the clips folder. Passes the tuned `config.json` automatically.
+- `CLAUDE.md`: operating guide so an agentic AI assistant can install, run, and
+  manage the tool for the user. README gains a Windows double-click quickstart
+  and an "Install with an AI assistant" section with copy-paste prompts.
 
 ### Changed
 - Default highlight-selection model is now `gpt-oss:20b` (was `qwen2.5:14b`).

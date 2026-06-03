@@ -18,7 +18,24 @@ Local, GPU-accelerated highlight extractor for Twitch / Kick VODs and raw m3u8 s
 
 **This is not:** a hosted service, a Twitch clip uploader, or a one-click TikTok publisher. It produces files locally — what you do with them is up to you.
 
-## Quickstart
+## Quickstart (Windows — the easy way)
+
+Not technical? This is the whole thing. You need a Windows PC with an NVIDIA graphics card.
+
+1. **Install [Git for Windows](https://git-scm.com/download/win)** (click through the installer — defaults are fine). This is the only thing you install by hand.
+2. **Download the project.** Open the Start menu, type `powershell`, hit Enter, then paste:
+   ```powershell
+   git clone https://github.com/NexRushVr/twitch-highlights.git "$HOME\twitch-highlights"
+   ```
+3. **Install everything else automatically.** Open the new `twitch-highlights` folder (it's in your user folder) and **double-click `install.bat`**. It installs Python, ffmpeg, Ollama, the AI model, and all the rest, and tunes itself to your GPU. First run takes 10–30 min (big downloads). Leave it until it says *Install complete!*
+4. **Make clips.** Double-click **`run.bat`** and answer the questions (which channel, how many clips). When it finishes it offers to open the folder with your clips.
+
+That's it. To make more clips later, just double-click `run.bat` again.
+
+> Prefer to have an AI assistant do all of this for you? See [Install with an AI assistant](#install-with-an-ai-assistant-claude-etc) below.
+
+<details>
+<summary><b>Manual quickstart (advanced / macOS / Linux)</b></summary>
 
 Assumes Python 3.10+, ffmpeg on `PATH`, an NVIDIA GPU (CPU works but is much slower), and Ollama running locally. Detailed install + GPU notes are in the [Install](#install) section.
 
@@ -37,9 +54,49 @@ python pipeline.py --source-type kick --channel abehamm --clip-mode all
 python pipeline.py --source-type vodvod --channel "@eevi" --clip-mode all
 ```
 
+</details>
+
 Output lands in `clips/<streamer>/<vod_date>/`. Re-running on the same VOD is a fast no-op — every step is cached per VOD-date.
 
 > **Picking a source type:** Use `twitch` when you have a still-live VOD URL — perfect for clipping your own streams. Use `kick` for any Kick channel. Use `vodvod` for older Twitch streams whose original VODs have expired (Twitch only retains them 14–60 days depending on the streamer's tier). Use `local` when you already have the recording on disk (OBS output, downloaded VOD, etc.) as an `.mp4` or `.ts`.
+
+## Install with an AI assistant (Claude, etc.)
+
+If you use an **agentic coding assistant** that can run commands on your machine — [Claude Code](https://claude.com/claude-code), Cursor, the Claude or ChatGPT desktop apps with computer/terminal access, etc. — you can have it do the whole install, run the tool, and manage it for you. This is the most hands-off path: you describe what you want in plain English and the assistant handles the terminal.
+
+**What it can do for you**
+- Clone the repo, run the installer, and fix anything that goes wrong (driver issues, missing tools, PATH problems).
+- Run the pipeline for a channel you name and tell you where the clips landed.
+- Change settings for you ("use fewer clips", "switch to the bigger AI model", "only clip when I say 'clip that'").
+- Set up a nightly automatic run, or tweak which streamers it watches.
+
+**Example prompt to get started** — paste this into Claude Code (or a similar tool) from any folder:
+
+```text
+Install and set up the twitch-highlights tool for me on this Windows PC.
+
+1. Clone https://github.com/NexRushVr/twitch-highlights into my home folder.
+2. Read its README, then run the Windows installer (install.bat / install.ps1)
+   and resolve anything that fails — I have an NVIDIA GPU and want GPU acceleration.
+3. When it's installed, make a test reel of the 5 best moments from the Kick
+   channel "abehamm" and tell me the folder the clips are in.
+
+Explain what you're doing as you go, and ask me before anything destructive.
+```
+
+**Follow-up prompts you can use any time**
+
+```text
+Make 10 clips from my latest Twitch VOD: <paste your twitch.tv/videos/... link>
+```
+```text
+Switch the highlight model to gpt-oss:20b and re-run the last channel.
+```
+```text
+Set up a nightly job that clips channels X, Y, Z at 3am and logs the results.
+```
+
+> The repo ships with `CLAUDE.md`-friendly structure and a full `--help` (`python pipeline.py --help`), so an assistant can discover every option on its own. You stay in control — a good assistant will confirm before installing software or deleting files.
 
 ## How it works
 
@@ -135,7 +192,7 @@ ffmpeg -version            # ffmpeg on PATH
 yt-dlp --version           # yt-dlp on PATH
 ollama list                # Ollama running, default model present (start the daemon first if this errors)
 python -c "import whisper, torch; print('cuda:', torch.cuda.is_available())"
-pip install -r requirements-dev.txt && pytest -q   # 211 unit tests (no GPU/network needed)
+pip install -r requirements-dev.txt && pytest -q   # 221 unit tests (no GPU/network needed)
 ```
 
 If `torch.cuda.is_available()` prints `False`, see the GPU section above. If `ollama list` errors with a connection refused, start the daemon (`ollama serve` or launch the tray app) and retry.
