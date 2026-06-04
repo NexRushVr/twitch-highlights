@@ -6,6 +6,35 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-06-04
+
+### Fixed
+- **GUI froze on launch.** The window opened but was blank/unresponsive. `JsApi`
+  exposed the pywebview `Window` as a *public* attribute; pywebview builds its JS
+  bridge by recursively walking every public attribute of the api object, hit the
+  circular `Window` back-reference, and never finished — so the page's `loaded`
+  event never fired and the UI was dead. Fixed by making the window/runner refs
+  private (`_window`, `_runner`) so pywebview exposes only the public methods.
+- **Security: command injection in the generated `nightly.ps1`.** Channel / model
+  / backend names were interpolated into double-quoted PowerShell strings with
+  insufficient escaping, so a value containing `$(...)` or a backtick could run
+  arbitrary commands when the nightly Task Scheduler job parsed the script. Now
+  emitted as single-quoted PowerShell literals, and channel/model/backend are
+  validated against strict allowlists before the script is written.
+- A fast double-click on **Start** could launch two concurrent pipeline runs (the
+  single-run guard read a process handle that the worker thread sets only later).
+  The run slot is now claimed atomically under a lock.
+- The **cancel** message told users to tick *Force* to recover from a partial
+  download, but `--force` only re-cuts clips and still reuses a cached video. It
+  now says to delete the partial file.
+- Skip-guard **"Open folder"** returned a broken path when the output directory
+  contained a space (e.g. a Windows username with a space). The manifest path is
+  parsed without whitespace-tokenizing.
+- Clearing the Settings **"Max clips"** field wrote `max_clips: 0` (zero clips out);
+  now floored to 1 on both the JS and Python sides.
+- Docs: `CLAUDE.md` referenced the `--onedir` exe path; corrected to the
+  `--onefile` `dist\TwitchHighlights.exe` the build actually produces.
+
 ## [1.1.0] - 2026-06-04
 
 ### Fixed

@@ -427,7 +427,7 @@ $('saveCfgBtn').addEventListener('click', async () => {
     const el = $('cfg-' + k);
     if (!el) return;
     if (CFG_BOOL.includes(k)) updates[k] = el.checked;
-    else if (CFG_NUM.includes(k)) updates[k] = parseInt(el.value, 10) || 0;
+    else if (CFG_NUM.includes(k)) updates[k] = Math.max(1, parseInt(el.value, 10) || 1);
     else updates[k] = el.value;
   });
   const res = await api().save_config(updates);

@@ -89,7 +89,7 @@ pipeline — it shells out to `.venv\Scripts\python.exe pipeline.py <flags>` exa
 like `run.ps1`, and monitors progress. Everything stays as inspectable scripts.
 - **Launch from source:** double-click `gui.bat` (installs `pywebview` on first run).
 - **Build the .exe:** `powershell -ExecutionPolicy Bypass -File build_gui.ps1` ->
-  `dist\TwitchHighlights\TwitchHighlights.exe` (icon included). Ship the exe at the
+  `dist\TwitchHighlights.exe` (single-file, icon included). Ship the exe at the
   repo root, next to `.venv` and `pipeline.py`. Needs the Edge WebView2 runtime
   (ships with Windows 11).
 - **How monitoring works:** the GUI sets env `VOD_CLIP_PROGRESS_JSON=<file>` before

@@ -40,21 +40,28 @@ _SETTINGS_KEYS = (
 
 class JsApi:
     def __init__(self):
-        self.window = None          # set by app.py after create_window
+        # NOTE: these MUST stay underscore-prefixed. pywebview builds the JS
+        # bridge by recursively walking every *public* (non-`_`) attribute of
+        # this object (webview/util.py get_functions). A public `window`
+        # attribute pointing back at the pywebview Window is circular and makes
+        # that walk never finish, so the page's `loaded` event never fires and
+        # the whole UI hangs. Keeping state private makes pywebview expose only
+        # the public *methods* below as JS functions.
+        self._window = None         # set by app.py after create_window
         self._alive = True
-        self.runner = PipelineRunner(emit=self._push)
+        self._runner = PipelineRunner(emit=self._push)
 
-    # -- window plumbing ----------------------------------------------------
+    # -- window plumbing (called from app.py, not from JS) ------------------
 
     def attach(self, window) -> None:
-        self.window = window
+        self._window = window
 
     def set_alive(self, alive: bool) -> None:
         self._alive = alive
 
     def _push(self, event: dict) -> None:
         """Forward a runner/progress event to the JS side. Thread-safe."""
-        win = self.window
+        win = self._window
         if win is None or not self._alive:
             return
         try:
@@ -73,7 +80,7 @@ class JsApi:
             "venv_ready": paths.venv_ready(),
             "has_config": os.path.isfile(paths.config_path()),
             "app_dir": paths.app_dir(),
-            "running": self.runner.is_running(),
+            "running": self._runner.is_running(),
             "nightly_registered": self._nightly_registered(),
         }
 
@@ -158,8 +165,16 @@ class JsApi:
             return {"status": "error", "message": "Invalid settings payload."}
         cfg = self._load_config_dict()
         for key, val in updates.items():
-            if key in _SETTINGS_KEYS:
-                cfg[key] = val
+            if key not in _SETTINGS_KEYS:
+                continue
+            # Defensive coercion so a bad client value can't write a config the
+            # pipeline mishandles (e.g. a cleared field -> max_clips:0 -> 0 clips).
+            if key == "max_clips":
+                try:
+                    val = max(1, int(val))
+                except (TypeError, ValueError):
+                    val = 10
+            cfg[key] = val
         try:
             with open(paths.config_path(), "w", encoding="utf-8", newline="\n") as f:
                 json.dump(cfg, f, indent=2, ensure_ascii=False)
@@ -171,10 +186,10 @@ class JsApi:
     # -- run control --------------------------------------------------------
 
     def start_run(self, opts: dict) -> dict:
-        return self.runner.start(opts or {})
+        return self._runner.start(opts or {})
 
     def cancel_run(self) -> dict:
-        return self.runner.cancel()
+        return self._runner.cancel()
 
     def run_meta(self) -> dict:
         """Static options for the run form (kept in sync with the pipeline)."""
@@ -277,11 +292,11 @@ class JsApi:
 
     def pick_file(self) -> dict:
         """Native open-file dialog for the `local` source type."""
-        if self.window is None:
+        if self._window is None:
             return {"path": None}
         try:
             import webview
-            result = self.window.create_file_dialog(
+            result = self._window.create_file_dialog(
                 webview.OPEN_DIALOG,
                 allow_multiple=False,
                 file_types=("Video files (*.mp4;*.ts;*.mkv;*.mov)", "All files (*.*)"),
@@ -322,6 +337,21 @@ class JsApi:
         model = cfg.get("ollama_model") or "gpt-oss:20b"
         max_vodvod = int(cfg.get("max_clips_vodvod") or 10)
         max_kick = int(cfg.get("max_clips_kick") or 15)
+
+        # Reject anything that isn't a plausible channel handle / model / backend
+        # before it reaches the generated PowerShell. These strings are otherwise
+        # untrusted (stream/channel-derived); _render_nightly also single-quotes
+        # them, so this is belt-and-suspenders against script injection.
+        chan_re = re.compile(r"^@?[A-Za-z0-9_.-]{1,64}$")
+        bad = [c for c in (vodvod + kick) if not chan_re.match(c)]
+        if bad:
+            return {"status": "error",
+                    "message": "Invalid channel name(s): " + ", ".join(bad[:5])
+                    + ". Use letters, numbers, _ . - (optional leading @)."}
+        if backend not in ("ollama", "openai"):
+            return {"status": "error", "message": "llm_backend must be ollama or openai."}
+        if not re.match(r"^[A-Za-z0-9_.:-]{1,64}$", model):
+            return {"status": "error", "message": "Invalid model name."}
 
         script = self._render_nightly(vodvod, kick, backend, model, max_vodvod, max_kick)
         try:
@@ -382,8 +412,19 @@ class JsApi:
 
     @staticmethod
     def _render_nightly(vodvod, kick, backend, model, max_vodvod, max_kick) -> str:
+        def ps_lit(s):
+            # Single-quoted PowerShell literal: PS does NO $ / backtick / $(...)
+            # subexpression expansion inside single quotes, so this is safe even
+            # for hostile input. Double any embedded single quote to escape it.
+            return "'%s'" % str(s).replace("'", "''")
+
         def ps_list(items):
-            return ", ".join('"%s"' % i.replace('"', '`"') for i in items)
+            return ", ".join(ps_lit(i) for i in items)
+
+        backend_lit = ps_lit(backend)
+        model_lit = ps_lit(model)
+        max_vodvod = int(max_vodvod)
+        max_kick = int(max_kick)
 
         return f"""# Nightly highlight pipeline runner (generated by the GUI).
 # Edit freely — re-generating from the app overwrites this file.
@@ -401,8 +442,8 @@ $venvPy = Join-Path $PSScriptRoot ".venv\\Scripts\\python.exe"
 $vodvodChannels = @({ps_list(vodvod)})
 $kickChannels   = @({ps_list(kick)})
 
-$llmBackend  = "{backend}"
-$ollamaModel = "{model}"
+$llmBackend  = {backend_lit}
+$ollamaModel = {model_lit}
 
 "===== Run started: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') =====" | Tee-Object -FilePath $logFile -Append | Out-Host
 

@@ -115,20 +115,31 @@ class PipelineRunner:
         self._lock = threading.Lock()
         self._proc: subprocess.Popen | None = None
         self._cancelled = False
+        self._starting = False
         self._seq = 0
 
     # -- public API ---------------------------------------------------------
 
     def is_running(self) -> bool:
         with self._lock:
-            return self._proc is not None and self._proc.poll() is None
+            return self._starting or (self._proc is not None and self._proc.poll() is None)
+
+    def _release_slot(self) -> None:
+        with self._lock:
+            self._starting = False
 
     def start(self, opts: dict) -> dict:
         """Validate, then launch on a background thread. Returns immediately."""
-        if self.is_running():
-            return {"status": "busy", "message": "A run is already in progress."}
+        # Claim the single run slot atomically. `_proc` is only set later on the
+        # worker thread, so without this a fast double-click could pass the
+        # is_running() check twice and spawn two concurrent pipelines.
+        with self._lock:
+            if self._starting or (self._proc is not None and self._proc.poll() is None):
+                return {"status": "busy", "message": "A run is already in progress."}
+            self._starting = True
 
         if not venv_ready():
+            self._release_slot()
             return {
                 "status": "no_venv",
                 "message": "Setup hasn't been run yet. Double-click install.bat "
@@ -137,6 +148,7 @@ class PipelineRunner:
 
         args, err = build_args(opts)
         if err:
+            self._release_slot()
             return {"status": "invalid", "message": err}
 
         thread = threading.Thread(target=self._run, args=(args,), daemon=True)
@@ -206,6 +218,7 @@ class PipelineRunner:
                 with self._lock:
                     self._proc = proc
                     self._cancelled = False
+                    self._starting = False   # slot now held by a live _proc
 
                 tail = threading.Thread(
                     target=self._tail_progress,
@@ -228,6 +241,7 @@ class PipelineRunner:
             with self._lock:
                 cancelled = self._cancelled
                 self._proc = None
+                self._starting = False   # release slot even if launch failed
 
         self._emit(self._classify(rc, cancelled, log_path))
 
@@ -283,7 +297,8 @@ class PipelineRunner:
                 "returncode": rc,
                 "outcome": "cancelled",
                 "message": "Run cancelled. A partial download may remain in "
-                           "downloads/ — tick Force on the next run if it's reused.",
+                           "downloads/ — delete that video file before re-running. "
+                           "(Force re-cuts clips but still reuses a cached video.)",
             }
 
         manifest = self._find_manifest(log_text)
@@ -324,18 +339,33 @@ class PipelineRunner:
 
     @staticmethod
     def _find_manifest(log_text: str) -> str | None:
-        """Pull the manifest path from the pipeline's `   Manifest: <path>` line,
-        falling back to scanning for any `clips_manifest.json` mention."""
+        """Pull the manifest path from the pipeline output. Handles paths that
+        contain spaces (e.g. a custom output_dir under C:\\Users\\John Doe\\)."""
+        def resolve(cand):
+            cand = cand.strip().strip('"')
+            return os.path.normpath(os.path.join(app_dir(), cand)) if cand else None
+
+        # Success path: "   Manifest: <path>" — take the whole remainder.
         for line in log_text.splitlines():
             s = line.strip()
             if s.startswith("Manifest:"):
-                cand = s[len("Manifest:"):].strip()
-                if cand:
-                    return os.path.normpath(os.path.join(app_dir(), cand))
+                m = resolve(s[len("Manifest:"):])
+                if m:
+                    return m
+        # Skip-guard: "[skip] <path> already has N clips. ..." — the path may
+        # contain spaces, so slice it out rather than tokenizing on whitespace.
+        for line in log_text.splitlines():
+            s = line.strip()
+            if s.startswith("[skip]"):
+                rest = s[len("[skip]"):].strip()
+                idx = rest.find(" already has")
+                m = resolve(rest[:idx] if idx != -1 else rest)
+                if m:
+                    return m
+        # Generic fallback (paths without spaces): last token ending in the file.
         for line in log_text.splitlines():
             if "clips_manifest.json" in line:
-                # last whitespace-delimited token that ends with the filename
                 for tok in reversed(line.split()):
                     if tok.endswith("clips_manifest.json"):
-                        return os.path.normpath(os.path.join(app_dir(), tok))
+                        return resolve(tok)
         return None
