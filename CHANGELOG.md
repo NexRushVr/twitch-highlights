@@ -6,6 +6,8 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-06-04
+
 ### Fixed
 - RTX 50-series (Blackwell, sm_120) GPUs couldn't actually use CUDA. The installer
   pinned `cu121` PyTorch, which installs cleanly and even reports
@@ -16,10 +18,6 @@ versioning follows [SemVer](https://semver.org/).
   running a real GPU op instead of trusting `is_available()` (which lies here).
   `--upgrade` so an existing `cu121` torch from an older install is replaced.
   README's manual GPU step updated to `cu128` with a Blackwell note.
-
-## [1.1.0] - 2026-06-04
-
-### Fixed
 - First run after a Windows install crashed with
   `JSONDecodeError: Expecting value: line 1 column 1 (char 0)` reading
   `config.json`. The installer wrote it via PowerShell 5.1 `Out-File -Encoding
