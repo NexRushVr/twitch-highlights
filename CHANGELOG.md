@@ -6,6 +6,8 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-06-04
+
 ### Added
 - **AVIF export.** Optionally encode each finished clip to two small, animated
   AVIFs for Discord, via the AvifTools module
