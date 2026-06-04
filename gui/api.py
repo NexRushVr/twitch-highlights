@@ -21,6 +21,7 @@ import threading
 
 import paths
 from runner import VALID_MODES, VALID_SOURCES, PipelineRunner
+from version import get_version
 
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
 _TASK_NAME = "twitch-highlights-nightly"
@@ -84,6 +85,7 @@ class JsApi:
             "app_dir": paths.app_dir(),
             "running": self._runner.is_running(),
             "nightly_registered": self._nightly_registered(),
+            "version": get_version(),
         }
 
     def preflight(self) -> dict:
@@ -236,6 +238,7 @@ class JsApi:
                 text=True, encoding="utf-8", errors="replace",
                 creationflags=_CREATE_NO_WINDOW,
             )
+            count = 0
             for line in proc.stdout:
                 line = line.rstrip()
                 if line.startswith("AVIFPROGRESS"):
@@ -250,11 +253,14 @@ class JsApi:
                                 "label": parts[2] if len(parts) >= 3 else "",
                                 "source": source})
                 elif line.startswith("AVIFDONE"):
+                    m = re.match(r"AVIFDONE\s+(\d+)", line)
+                    if m:
+                        count = int(m.group(1))
                     idx = line.find("-> ")
                     if idx != -1:
                         out_dir = line[idx + 3:].strip()
             rc = proc.wait()
-            self._push({"type": "avif_done", "returncode": rc,
+            self._push({"type": "avif_done", "returncode": rc, "count": count,
                         "out_dir": out_dir, "source": source})
         except OSError as e:
             self._push({"type": "avif_done", "returncode": -1,

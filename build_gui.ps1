@@ -26,21 +26,37 @@ Write-Host "Installing build dependencies (pywebview + pyinstaller)..." -Foregro
 & $py -m pip install -r requirements-gui.txt
 & $py -m pip install "pyinstaller>=6.0"
 
+# Bake the current git tag into gui\version.py so the exe shows its build
+# version (the frozen app can't run git). Restored after the build.
+$verFile = Join-Path $PSScriptRoot "gui\version.py"
+$verOrig = Get-Content $verFile -Raw
+$gitVer = (git -C $PSScriptRoot describe --tags --always 2>$null)
+if ($gitVer) {
+    ($verOrig -replace '_BAKED = "dev"', ('_BAKED = "' + $gitVer.Trim() + '"')) |
+        Set-Content $verFile -Encoding utf8 -NoNewline
+    Write-Host "Baked version into the exe: $gitVer" -ForegroundColor Cyan
+}
+
 Write-Host "Building TwitchHighlights.exe..." -ForegroundColor Cyan
 # --onefile: a single clickable exe (drop it at the repo root next to .venv).
 # For debugging a bundling issue, swap --onefile for --onedir (faster start,
 # emits dist\TwitchHighlights\ with a readable _internal folder).
-& $py -m PyInstaller `
-    --noconfirm `
-    --clean `
-    --noconsole `
-    --onefile `
-    --name TwitchHighlights `
-    --icon "gui\icon.ico" `
-    --add-data "gui\web;web" `
-    --collect-all webview `
-    --collect-all clr_loader `
-    "gui\app.py"
+try {
+    & $py -m PyInstaller `
+        --noconfirm `
+        --clean `
+        --noconsole `
+        --onefile `
+        --name TwitchHighlights `
+        --icon "gui\icon.ico" `
+        --add-data "gui\web;web" `
+        --collect-all webview `
+        --collect-all clr_loader `
+        "gui\app.py"
+} finally {
+    # Restore the committed "dev" placeholder so the source tree stays clean.
+    Set-Content $verFile -Value $verOrig -Encoding utf8 -NoNewline
+}
 
 if ($LASTEXITCODE -eq 0) {
     Write-Host ""

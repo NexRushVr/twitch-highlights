@@ -172,10 +172,20 @@ def clips_from_manifest(manifest: list, source: str) -> list:
     return [f for f in files if f]
 
 
-def _resolve(base_dir: str, p: str) -> str:
+def _resolve_clip(p: str, run_dir: str) -> str:
+    """Resolve a manifest clip path. The pipeline writes paths relative to the
+    REPO ROOT (output_dir is `./clips/...`), not the run dir — so resolving
+    against run_dir double-joins the path and the file is "missing". Try the
+    likely bases and pick the one that exists."""
     if not p:
         return p
-    return p if os.path.isabs(p) else os.path.normpath(os.path.join(base_dir, p))
+    if os.path.isabs(p):
+        return os.path.normpath(p)
+    for base in (_repo_root(), run_dir, os.getcwd()):
+        cand = os.path.normpath(os.path.join(base, p))
+        if os.path.isfile(cand):
+            return cand
+    return os.path.normpath(os.path.join(_repo_root(), p))
 
 
 def _main(argv=None) -> int:
@@ -205,7 +215,7 @@ def _main(argv=None) -> int:
     with open(manifest_path, encoding="utf-8") as f:
         manifest = json.load(f)
 
-    clips = [_resolve(run_dir, p) for p in clips_from_manifest(manifest, args.source)]
+    clips = [_resolve_clip(p, run_dir) for p in clips_from_manifest(manifest, args.source)]
     if not clips:
         print("No clips found in manifest.")
         return 1

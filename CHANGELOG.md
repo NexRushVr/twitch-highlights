@@ -6,6 +6,24 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-06-04
+
+### Fixed
+- **Making AVIFs at a new size produced nothing** when a run already had AVIFs at
+  another size (e.g. 25 MB present, asking for 10 MB did nothing). The on-demand
+  exporter resolved each manifest clip path against the *run directory*, but the
+  pipeline writes those paths relative to the *repo root* (`./clips/<streamer>/<date>/…`)
+  — so the path double-joined, every clip looked "missing", and zero AVIFs were
+  silently produced. (The in-pipeline export uses a different resolution, which is
+  why the first set appeared.) Now resolves correctly, with a regression test on
+  the real manifest path format.
+
+### Added
+- The GUI shows its build **version** in the sidebar (so it's obvious which build
+  is running — `build_gui.ps1` bakes the git tag into the exe), and the AVIF
+  buttons now report **"made N AVIFs in &lt;folder&gt;"** so you can see exactly what
+  was produced.
+
 ## [1.4.0] - 2026-06-04
 
 ### Changed

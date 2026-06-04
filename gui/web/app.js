@@ -258,8 +258,9 @@ window.onProgress = function (ev) {
       $('avifCaptioned').disabled = false;
       $('avifClean').disabled = false;
       if (ev.returncode === 0) {
-        $('avifStatus').textContent =
-          `Done ✓ — ${ev.source === 'captioned' ? 'avif/' : 'avif-clean/'}`;
+        const folder = ev.source === 'captioned' ? 'avif/' : 'avif-clean/';
+        const n = ev.count || 0;
+        $('avifStatus').textContent = `Done ✓ — made ${n} AVIF${n === 1 ? '' : 's'} in ${folder}`;
         if (ev.out_dir) api().open_path(ev.out_dir);
         loadRuns();
       } else {
@@ -573,6 +574,7 @@ async function refreshStatus() {
   if (s.running) setPill('Running', 'pill-run');
   else if (s.venv_ready) setPill('Ready', 'pill-ok');
   else setPill('Setup needed', 'pill-bad');
+  if (s.version) $('versionLabel').textContent = /^v/.test(s.version) ? s.version : 'v' + s.version;
   $('unregisterNightlyBtn').classList.toggle('hidden', !s.nightly_registered);
   if (!s.venv_ready) {
     $('startBtn').disabled = true;
