@@ -76,6 +76,13 @@ DEFAULT_CONFIG = {
     "avif_opt_fps": 30,               # "-opt" frame rate
     "avif_preset": 6,                 # SVT-AV1 speed/quality (0 slow/best .. 13 fast)
     "avif_module_path": "",           # optional explicit path to the AvifTools module
+    # Target-size mode: when > 0, encode ONE <streamer>-<rand>-<N>mb.avif per clip
+    # aimed under N MB (auto bitrate + downscale/fps-drop within the floors below),
+    # instead of the fixed-quality not/opt pair. Uses AvifTools' -TargetSizeMB.
+    "avif_target_mb": 0,              # 0 = quality mode (not+opt); e.g. 10 = aim < 10 MB
+    "avif_levers": "Quality,Resolution,Fps",  # knobs target mode may turn (subset locks rest)
+    "avif_min_width": 480,            # target-mode resolution floor (px)
+    "avif_min_fps": 24,               # target-mode frame-rate floor
 
     # Disk cleanup — after a successful run, delete the downloaded VOD, any
     # windowed trim, and the derived WAV to reclaim multi-GB of space. The

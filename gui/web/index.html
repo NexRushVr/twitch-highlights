@@ -110,6 +110,23 @@
           Also export Discord <strong>AVIFs</strong> — tiny looping clips, from the captioned cuts
           <span class="hint inline">(adds an 8th step; uses your AvifTools repo)</span>
         </label>
+        <div class="avif-opts hidden" id="avifOpts">
+          <label class="field-label sm" for="avifProfile">AVIF target</label>
+          <div class="row wrap">
+            <div class="grow"><select id="avifProfile">
+              <option value="quality">HQ + optimized (2 files)</option>
+              <option value="8">Target ≤ 8 MB (Discord free)</option>
+              <option value="10">Target ≤ 10 MB</option>
+              <option value="25">Target ≤ 25 MB (Nitro Basic)</option>
+              <option value="50">Target ≤ 50 MB</option>
+              <option value="custom">Custom size…</option>
+            </select></div>
+            <div class="narrow hidden" id="avifCustomWrap">
+              <input id="avifCustomMb" type="number" min="1" step="0.5" placeholder="MB" />
+            </div>
+          </div>
+          <p class="hint">Target mode aims one <code>&lt;name&gt;-&lt;N&gt;mb.avif</code> under the size (auto bitrate, may downscale to 480p / 24fps).</p>
+        </div>
       </div>
 
       <div class="run-bar">
@@ -151,7 +168,16 @@
           <button class="btn btn-ghost" id="openRunFolder">Open folder</button>
         </div>
         <div class="row wrap avif-row">
-          <span class="field-label sm">Make AVIFs (Discord):</span>
+          <span class="field-label sm">Make AVIFs:</span>
+          <select id="avifResProfile" class="avif-res-select">
+            <option value="quality">HQ + optimized</option>
+            <option value="8">≤ 8 MB</option>
+            <option value="10" selected>≤ 10 MB</option>
+            <option value="25">≤ 25 MB</option>
+            <option value="50">≤ 50 MB</option>
+            <option value="custom">Custom…</option>
+          </select>
+          <input id="avifResCustomMb" class="narrow hidden" type="number" min="1" step="0.5" placeholder="MB" />
           <button class="btn btn-ghost" id="avifCaptioned">From captioned</button>
           <button class="btn btn-ghost" id="avifClean">From clean cuts</button>
           <span id="avifStatus" class="run-cmd"></span>

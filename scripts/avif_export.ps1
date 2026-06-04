@@ -7,10 +7,12 @@
 
   It reads a JSON job file and writes a JSON result file:
 
-    Job:    { outDir, modulePath, localRepo, maxWidth, preset,
-              variants: [{suffix, crf, fps}, ...],
-              items:    [{input, name}, ...] }
-    Result: { results: [{input, name, variant, file}, ...] }
+    Job:    { outDir, modulePath, localRepo, maxWidth, preset, needTargetSize,
+              levers: ["Quality","Resolution","Fps"], minWidth, minFps,
+              variants: [{suffix, crf, fps}            # quality variant
+                         {suffix, targetMb, fps}],     # target-size variant
+              items:    [{input, name}] }
+    Result: { results: [{input, name, variant, file}] }
 
   Per item it emits a host line  "AVIFPROGRESS <done>/<total> <name>-<suffix>"
   that the Python wrapper parses for progress.
@@ -24,35 +26,49 @@ param(
 $ErrorActionPreference = 'Stop'
 $job = Get-Content -LiteralPath $JobFile -Raw | ConvertFrom-Json
 
-function Ensure-AvifTools([string]$explicit, [string]$localRepo) {
-    if (Get-Command Convert-ToAvif -ErrorAction SilentlyContinue) { return }
-    # 1) explicit module path from config
-    if ($explicit -and (Test-Path $explicit)) {
-        Import-Module $explicit -Force -ErrorAction Stop
-    }
-    # 2) already installed in the PS module path
-    elseif (Get-Module -ListAvailable -Name AvifTools) {
-        Import-Module AvifTools -Force -ErrorAction Stop
-    }
-    # 3) a sibling local checkout of the repo (dev machines)
-    elseif ($localRepo -and (Test-Path $localRepo)) {
-        Import-Module $localRepo -Force -ErrorAction Stop
-    }
-    # 4) pull it from GitHub as a tool (install to the user module path; -NoProfile
-    #    so we don't edit the user's PowerShell profile)
-    else {
-        Write-Host "Installing AvifTools from github.com/NexRushVr/optimized-discord-gifs-avif ..."
-        $tmp = Join-Path $env:TEMP "aviftools_install.ps1"
-        Invoke-RestMethod -Uri "https://raw.githubusercontent.com/NexRushVr/optimized-discord-gifs-avif/main/install.ps1" -OutFile $tmp -ErrorAction Stop
-        & $tmp -NoProfile
-        Import-Module AvifTools -Force -ErrorAction Stop
-    }
+$AvifInstallUrl = "https://raw.githubusercontent.com/NexRushVr/optimized-discord-gifs-avif/main/install.ps1"
+
+function Install-AvifFromGitHub {
+    Write-Host "Installing AvifTools from github.com/NexRushVr/optimized-discord-gifs-avif ..."
+    $tmp = Join-Path $env:TEMP "aviftools_install.ps1"
+    Invoke-RestMethod -Uri $AvifInstallUrl -OutFile $tmp -ErrorAction Stop
+    # -NoProfile: install the module without editing the user's PowerShell profile.
+    & $tmp -NoProfile
+    Import-Module AvifTools -Force -ErrorAction Stop
+}
+
+function Initialize-AvifTools([string]$explicit, [string]$localRepo, [bool]$needTargetSize) {
     if (-not (Get-Command Convert-ToAvif -ErrorAction SilentlyContinue)) {
-        throw "AvifTools imported but Convert-ToAvif is unavailable."
+        if ($explicit -and (Test-Path $explicit)) {
+            Import-Module $explicit -Force -ErrorAction Stop
+        }
+        elseif (Get-Module -ListAvailable -Name AvifTools) {
+            Import-Module AvifTools -Force -ErrorAction Stop
+        }
+        elseif ($localRepo -and (Test-Path $localRepo)) {
+            Import-Module $localRepo -Force -ErrorAction Stop
+        }
+        else {
+            Install-AvifFromGitHub
+        }
+    }
+    $cmd = Get-Command Convert-ToAvif -ErrorAction SilentlyContinue
+    if (-not $cmd) { throw "AvifTools imported but Convert-ToAvif is unavailable." }
+
+    # Self-heal: a previously-installed or sibling copy may predate a feature we
+    # need (e.g. -TargetSizeMB). Pull the latest from GitHub and re-import once.
+    if ($needTargetSize -and -not $cmd.Parameters.ContainsKey('TargetSizeMB')) {
+        Write-Host "Installed AvifTools is missing -TargetSizeMB; pulling the latest from GitHub ..."
+        Install-AvifFromGitHub
+        $cmd = Get-Command Convert-ToAvif -ErrorAction SilentlyContinue
+        if (-not ($cmd -and $cmd.Parameters.ContainsKey('TargetSizeMB'))) {
+            throw "AvifTools is too old for target-size mode even after updating from GitHub."
+        }
     }
 }
 
-Ensure-AvifTools $job.modulePath $job.localRepo
+$needTarget = [bool]$job.needTargetSize
+Initialize-AvifTools $job.modulePath $job.localRepo $needTarget
 
 New-Item -ItemType Directory -Force -Path $job.outDir | Out-Null
 
@@ -72,8 +88,22 @@ foreach ($it in $job.items) {
         $tmp = Join-Path $env:TEMP ("avif_" + [guid]::NewGuid().ToString("N"))
         New-Item -ItemType Directory -Force -Path $tmp | Out-Null
         try {
-            Convert-ToAvif -Path $it.input -OutputDir $tmp `
-                -Fps $v.fps -Crf $v.crf -MaxWidth $job.maxWidth -Preset $job.preset -Force | Out-Host
+            # Splat the right knobs for a quality vs. a target-size variant.
+            $p = @{ Path = $it.input; OutputDir = $tmp; Preset = $job.preset; Force = $true }
+            if ($v.targetMb -gt 0) {
+                $p.TargetSizeMB = [double]$v.targetMb
+                $p.MinWidth = [int]$job.minWidth
+                $p.MinFps = [int]$job.minFps
+                if ($job.levers) { $p.Levers = @($job.levers) }
+                if ($v.fps -gt 0) { $p.Fps = [int]$v.fps }      # fps cap (a "request")
+                if ($job.maxWidth -gt 0) { $p.MaxWidth = [int]$job.maxWidth }
+            }
+            else {
+                $p.Crf = [int]$v.crf
+                $p.Fps = [int]$v.fps
+                if ($job.maxWidth -gt 0) { $p.MaxWidth = [int]$job.maxWidth }
+            }
+            Convert-ToAvif @p | Out-Host
 
             $src = Join-Path $tmp ($base + ".avif")
             if (Test-Path -LiteralPath $src) {

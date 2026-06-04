@@ -209,6 +209,9 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 }
 .avif-toggle { margin-top: 14px; padding-top: 13px; border-top: 1px solid var(--line); align-items: flex-start; }
 .hint.inline { color: var(--muted); font-size: 12px; font-weight: 400; margin: 0 0 0 4px; }
+.avif-opts { margin-top: 12px; padding-left: 26px; }
+.avif-opts .hint { margin-top: 8px; }
 .avif-row { margin-top: 12px; align-items: center; }
+.avif-res-select { width: auto; min-width: 120px; }
 
 .hidden { display: none !important; }

@@ -362,7 +362,7 @@ def run(cfg: dict = None) -> list:
                 if base.endswith("_captioned"):
                     base = base[: -len("_captioned")]
                 if base in by_name:
-                    item["avif"] = {"opt": by_name[base]["opt"], "not": by_name[base]["not"]}
+                    item["avif"] = by_name[base]["files"]
             made = sum(1 for r in avif_results for k in ("opt", "not") if r.get(k))
             print(f"    Exported {made} AVIFs -> {avif_dir}")
 
@@ -428,6 +428,9 @@ def _build_arg_parser() -> argparse.ArgumentParser:
                         "(<streamer>-<rand>-not/opt.avif) via the AvifTools module")
     p.add_argument("--avif-source", choices=["captioned", "raw"],
                    help="Which clip to encode to AVIF (default: captioned)")
+    p.add_argument("--avif-target", type=float,
+                   help="Target AVIF size in MB — one <streamer>-<rand>-<N>mb.avif per "
+                        "clip (auto bitrate + downscale) instead of the quality not/opt pair")
     return p
 
 
@@ -482,5 +485,8 @@ if __name__ == "__main__":
         cfg["avif_export"] = True
     if args.avif_source:
         cfg["avif_source"] = args.avif_source
+    if args.avif_target is not None:
+        cfg["avif_export"] = True
+        cfg["avif_target_mb"] = args.avif_target
 
     run(cfg)

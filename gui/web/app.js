@@ -117,8 +117,29 @@ function gatherOpts() {
   if (mode === 'phrase') opts.trigger_phrase = $('triggerPhrase').value;
   else opts.max_clips = parseInt($('maxClips').value, 10) || 10;
   opts.avif = $('avifChk').checked;
+  if (opts.avif) opts.avif_target_mb = profileTargetMb($('avifProfile'), $('avifCustomMb'));
   return opts;
 }
+
+/* A profile <select> ('quality' | '<MB>' | 'custom') -> target MB (0 = quality). */
+function profileTargetMb(profileEl, customEl) {
+  const p = profileEl.value;
+  if (p === 'quality') return 0;
+  if (p === 'custom') return parseFloat(customEl.value) || 0;
+  return parseFloat(p) || 0;
+}
+
+/* Reveal the AVIF options when the run-form toggle is on; reveal custom-MB
+ * inputs only for the "custom" profile. */
+$('avifChk').addEventListener('change', () => {
+  $('avifOpts').classList.toggle('hidden', !$('avifChk').checked);
+});
+$('avifProfile').addEventListener('change', () => {
+  $('avifCustomWrap').classList.toggle('hidden', $('avifProfile').value !== 'custom');
+});
+$('avifResProfile').addEventListener('change', () => {
+  $('avifResCustomMb').classList.toggle('hidden', $('avifResProfile').value !== 'custom');
+});
 
 async function startRun() {
   const opts = gatherOpts();
@@ -375,10 +396,12 @@ $('avifClean').addEventListener('click', () => exportAvif('raw'));
 async function exportAvif(source) {
   const manifest = $('runSelect').value;
   if (!manifest) { toast('Pick a run first.'); return; }
+  const targetMb = profileTargetMb($('avifResProfile'), $('avifResCustomMb'));
   $('avifCaptioned').disabled = true;
   $('avifClean').disabled = true;
-  $('avifStatus').textContent = 'Starting AVIF export… (first run may install AvifTools)';
-  const res = await api().export_avif(manifest, source);
+  $('avifStatus').textContent = (targetMb ? `Encoding ≤ ${targetMb} MB…` : 'Starting AVIF export…')
+    + ' (first run may install AvifTools)';
+  const res = await api().export_avif(manifest, source, targetMb);
   if (res.status !== 'started') {
     $('avifStatus').textContent = res.message || 'Could not start.';
     $('avifCaptioned').disabled = false;

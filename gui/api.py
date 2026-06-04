@@ -199,27 +199,34 @@ class JsApi:
 
     # -- on-demand AVIF export ---------------------------------------------
 
-    def export_avif(self, manifest: str, source: str = "raw") -> dict:
-        """Encode a finished run's clips to AVIF on demand (the 'also make the
-        clean/non-captioned ones' button). Runs in the background and pushes
-        avif_progress / avif_done events. Reuses the venv + modules/avif_exporter."""
+    def export_avif(self, manifest: str, source: str = "raw", target_mb: float = 0) -> dict:
+        """Encode a finished run's clips to AVIF on demand (the Results-tab
+        buttons). target_mb > 0 -> one <base>-<N>mb.avif per clip; else the
+        quality not/opt pair. Runs in the background and pushes avif_progress /
+        avif_done events. Reuses the venv + modules/avif_exporter."""
         if not manifest or not os.path.isfile(manifest):
             return {"status": "error", "message": "Run not found."}
         if source not in ("captioned", "raw"):
             source = "raw"
+        try:
+            target_mb = float(target_mb or 0)
+        except (TypeError, ValueError):
+            target_mb = 0
         if self._avif_busy or self._runner.is_running():
             return {"status": "busy", "message": "Already busy — wait for the current job."}
         self._avif_busy = True
-        threading.Thread(target=self._run_avif, args=(manifest, source),
+        threading.Thread(target=self._run_avif, args=(manifest, source, target_mb),
                          daemon=True).start()
         return {"status": "started", "source": source}
 
-    def _run_avif(self, manifest: str, source: str) -> None:
+    def _run_avif(self, manifest: str, source: str, target_mb: float = 0) -> None:
         out_dir = None
         try:
             cmd = [paths.venv_python(), "-u",
                    os.path.join(paths.app_dir(), "modules", "avif_exporter.py"),
                    "--manifest", manifest, "--source", source]
+            if target_mb and target_mb > 0:
+                cmd += ["--target", str(target_mb)]
             env = os.environ.copy()
             env["PYTHONIOENCODING"] = "utf-8"
             env["PYTHONUTF8"] = "1"

@@ -79,6 +79,9 @@ Full table is in `README.md` under "Config reference".
   (`scripts/avif_export.ps1` + `modules/avif_exporter.py`), auto-installed from
   github.com/NexRushVr/optimized-discord-gifs-avif on first use. Needs ffmpeg with
   `libsvtav1`.
+- "Make AVIFs under N MB" -> add `--avif-target <MB>` (e.g. `--avif-target 10`, or
+  pick a size in the GUI's AVIF-target dropdown). Produces one
+  `<streamer>-<rand>-<N>mb.avif` aimed under that size (AvifTools `-TargetSizeMB`).
 
 Note: clip files are named `<streamer>-<random>.mp4` (e.g. `abehamm-a3f9c1.mp4`),
 not `clip_NNN_<reason>.mp4`. The reason/score are in the manifest + mp4 metadata.

@@ -103,6 +103,9 @@ def build_args(opts: dict) -> tuple[list[str], str | None]:
         args += ["--verbose"]
     if opts.get("avif"):
         args += ["--avif"]
+        tmb = opts.get("avif_target_mb")
+        if tmb:
+            args += ["--avif-target", str(tmb)]
 
     # Use the installer-tuned config when present (run.ps1 does the same).
     if os.path.isfile(config_path()):

@@ -52,6 +52,27 @@ def _avif_base(clip_path: str) -> str:
     return stem
 
 
+def _size_suffix(mb) -> str:
+    """Filename suffix for a target-size variant: 10 -> '10mb', 7.5 -> '7_5mb'."""
+    return ("%g" % float(mb)).replace(".", "_") + "mb"
+
+
+def _variants(cfg) -> list:
+    """Quality mode (avif_target_mb == 0) -> the not/opt pair. Target mode -> one
+    size-targeted variant (<base>-<N>mb.avif), aimed under N MB."""
+    target = float(cfg.get("avif_target_mb") or 0)
+    if target > 0:
+        # fps acts as a cap (the HQ fps "request") in target mode.
+        return [{"suffix": _size_suffix(target), "targetMb": target,
+                 "fps": int(cfg.get("avif_hq_fps", 60))}]
+    return [
+        {"suffix": "not", "crf": int(cfg.get("avif_hq_crf", 18)),
+         "fps": int(cfg.get("avif_hq_fps", 60))},
+        {"suffix": "opt", "crf": int(cfg.get("avif_opt_crf", 30)),
+         "fps": int(cfg.get("avif_opt_fps", 30))},
+    ]
+
+
 def export_clips_to_avif(clips, out_dir, cfg, on_progress=None):
     """Encode each clip in `clips` to an -opt and -not AVIF in `out_dir`.
 
@@ -64,18 +85,20 @@ def export_clips_to_avif(clips, out_dir, cfg, on_progress=None):
     os.makedirs(out_dir, exist_ok=True)
 
     items = [{"input": os.path.abspath(c), "name": _avif_base(c)} for c in clips]
+    variants = _variants(cfg)
+    levers = [s.strip() for s in str(cfg.get("avif_levers", "Quality,Resolution,Fps")).split(",")
+              if s.strip()]
     job = {
         "outDir": os.path.abspath(out_dir),
         "modulePath": cfg.get("avif_module_path", "") or "",
         "localRepo": _default_local_repo(),
         "maxWidth": int(cfg.get("avif_max_width", 854)),
         "preset": int(cfg.get("avif_preset", 6)),
-        "variants": [
-            {"suffix": "not", "crf": int(cfg.get("avif_hq_crf", 18)),
-             "fps": int(cfg.get("avif_hq_fps", 60))},
-            {"suffix": "opt", "crf": int(cfg.get("avif_opt_crf", 30)),
-             "fps": int(cfg.get("avif_opt_fps", 30))},
-        ],
+        "needTargetSize": any(v.get("targetMb", 0) for v in variants),
+        "levers": levers,
+        "minWidth": int(cfg.get("avif_min_width", 480)),
+        "minFps": int(cfg.get("avif_min_fps", 24)),
+        "variants": variants,
         "items": items,
     }
 
@@ -130,8 +153,8 @@ def export_clips_to_avif(clips, out_dir, cfg, on_progress=None):
         by_input.setdefault(r["input"], {})[r["variant"]] = r["file"]
     out = []
     for it in items:
-        files = by_input.get(it["input"], {})
-        out.append({"input": it["input"], "name": it["name"],
+        files = by_input.get(it["input"], {})   # {suffix: path}
+        out.append({"input": it["input"], "name": it["name"], "files": files,
                     "opt": files.get("opt"), "not": files.get("not")})
     return out
 
@@ -159,6 +182,9 @@ def _main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Export run clips to AVIF via AvifTools.")
     ap.add_argument("--manifest", required=True, help="Path to clips_manifest.json")
     ap.add_argument("--source", choices=["captioned", "raw"], default="captioned")
+    ap.add_argument("--target", type=float, default=None,
+                    help="Target size in MB (one <base>-<N>mb.avif per clip). "
+                         "Omit/0 for the quality not+opt pair.")
     ap.add_argument("--out", default=None,
                     help="Output dir (default <run>/avif, or <run>/avif-clean for raw)")
     args = ap.parse_args(argv)
@@ -170,6 +196,9 @@ def _main(argv=None) -> int:
     except Exception:
         from config import DEFAULT_CONFIG  # noqa: E402
         cfg = dict(DEFAULT_CONFIG)
+
+    if args.target is not None:
+        cfg["avif_target_mb"] = args.target
 
     manifest_path = os.path.abspath(args.manifest)
     run_dir = os.path.dirname(manifest_path)
@@ -189,7 +218,7 @@ def _main(argv=None) -> int:
         clips, out_dir, cfg,
         on_progress=lambda d, t, lbl: print(f"AVIFPROGRESS {d}/{t} {lbl}", flush=True),
     )
-    made = sum(1 for r in results for k in ("opt", "not") if r.get(k))
+    made = sum(len(r.get("files") or {}) for r in results)
     print(f"AVIFDONE {made} files -> {out_dir}", flush=True)
     return 0
 

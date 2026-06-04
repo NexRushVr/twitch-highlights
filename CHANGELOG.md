@@ -6,6 +6,20 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **AVIF target-size mode.** Aim each clip's AVIF *under a chosen size* (e.g. ≤10 MB
+  for Discord) instead of a fixed quality, using AvifTools' new `-TargetSizeMB`
+  (auto-chosen bitrate, with optional downscale / fps-drop within `avif_min_width`
+  and `avif_min_fps`, gated by `avif_levers`). Produces one
+  `<streamer>-<rand>-<N>mb.avif`. CLI: `--avif-target <MB>`; config: `avif_target_mb`
+  (+ `avif_levers` / `avif_min_width` / `avif_min_fps`). GUI: an AVIF-target selector
+  on the run form and in the Results AVIF row (8 / 10 / 25 / 50 MB or custom).
+
+### Fixed
+- AVIF auto-install is now **self-healing**: if an already-installed or sibling
+  AvifTools copy is too old to have `-TargetSizeMB`, the driver re-pulls the latest
+  from GitHub (and verifies the parameter exists) before encoding, instead of failing.
+
 ## [1.2.0] - 2026-06-04
 
 ### Added
