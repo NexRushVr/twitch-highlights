@@ -38,6 +38,11 @@ on those, follow the "Manual quickstart" in `README.md`.
 Interactive (best for the user): `powershell -ExecutionPolicy Bypass -File run.ps1`
 (or double-click `run.bat`).
 
+Desktop app (the friendliest path for non-technical users): double-click `gui.bat`
+(or build a standalone `TwitchHighlights.exe` — see "GUI" below). It's a thin
+pywebview window that *drives the same `pipeline.py`* — every process is still a
+visible script. First launch auto-installs `pywebview` into `.venv`.
+
 Direct, for scripted/agent use — always use the venv Python and the tuned config:
 ```
 .\.venv\Scripts\python.exe pipeline.py --config config.json --source-type kick --channel <name> --clip-mode all --max-clips 10
@@ -77,6 +82,28 @@ Full table is in `README.md` under "Config reference".
 - `No module named 'subprocess'` / "Failed to create .venv": a stale
   `PYTHONHOME`/`PYTHONPATH`. The installer clears these for its own process and
   retries; if creating the venv by hand, run with those env vars unset.
+
+## GUI (optional desktop app)
+A lightweight desktop front-end lives in `gui/`. It does **not** reimplement the
+pipeline — it shells out to `.venv\Scripts\python.exe pipeline.py <flags>` exactly
+like `run.ps1`, and monitors progress. Everything stays as inspectable scripts.
+- **Launch from source:** double-click `gui.bat` (installs `pywebview` on first run).
+- **Build the .exe:** `powershell -ExecutionPolicy Bypass -File build_gui.ps1` ->
+  `dist\TwitchHighlights\TwitchHighlights.exe` (icon included). Ship the exe at the
+  repo root, next to `.venv` and `pipeline.py`. Needs the Edge WebView2 runtime
+  (ships with Windows 11).
+- **How monitoring works:** the GUI sets env `VOD_CLIP_PROGRESS_JSON=<file>` before
+  spawning the pipeline. `modules/progress.py` then *also* appends one JSON line per
+  phase event (`set_total` / `phase_start` / `phase_end`) to that file, which the GUI
+  tails. This is purely additive — when the env var is unset, pipeline output is
+  byte-for-byte unchanged (the CLI/`run.bat` flow is untouched).
+- **Pieces:** `gui/app.py` (pywebview entry), `gui/api.py` (`JsApi` bridge — preflight
+  via `install.ps1 -Check`, config round-trip, run control, results from
+  `clips_manifest.json`, nightly scheduling), `gui/runner.py` (subprocess + progress
+  tail + `taskkill /T` cancel), `gui/web/` (vanilla-JS UI), `gui/icon.ico`
+  (regenerate with `python gui/make_icon.py`).
+- The four GUI tabs mirror the CLI: Make clips (the `run.ps1` form), Results, Setup
+  check, Settings (edits `config.json`, writes/register `nightly.ps1`).
 
 ## Guardrails
 - Don't delete the user's `downloads/`, `clips/`, or `config.json` without asking.

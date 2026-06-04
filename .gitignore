@@ -18,6 +18,10 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+*.spec
+
+# Built GUI binary (a release artifact, not source — built by build_gui.ps1)
+/TwitchHighlights.exe
 
 # Environments / secrets
 .env

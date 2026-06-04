@@ -29,6 +29,8 @@ faster-than-expected run doesn't oscillate past 100% mid-phase.
 """
 
 import itertools
+import json
+import os
 import sys
 import threading
 import time
@@ -118,6 +120,43 @@ class Progress:
         self._completed_weight = 0.0
         self._t0 = time.monotonic()
         self._estimated_total: float | None = None
+        # Opt-in machine-readable progress feed for GUI front-ends. When the
+        # env var `VOD_CLIP_PROGRESS_JSON` points at a file we *also* append one
+        # JSON line per phase event; the human-readable stdout is byte-for-byte
+        # unchanged either way. When the var is unset (`_sink is None`) every
+        # `_emit` below is a complete no-op, so default behavior never changes.
+        self._sink = self._open_sink()
+
+    @staticmethod
+    def _open_sink():
+        path = os.environ.get("VOD_CLIP_PROGRESS_JSON")
+        if not path:
+            return None
+        try:
+            # Line-buffered text append: each JSON line is flushed promptly so a
+            # tailing GUI sees events live. Failure to open is non-fatal — the
+            # pipeline must run with or without a listening front-end.
+            return open(path, "a", encoding="utf-8", buffering=1)
+        except OSError:
+            return None
+
+    def _emit(self, event: dict) -> None:
+        """Append one JSON event line to the progress feed, if one is attached.
+
+        Best-effort and never raises: a broken/closed sink must not take down a
+        long pipeline run."""
+        if self._sink is None:
+            return
+        try:
+            self._sink.write(json.dumps(event) + "\n")
+            self._sink.flush()
+        except (OSError, ValueError):
+            pass
+
+    def _remaining_seconds(self) -> float | None:
+        if self._estimated_total is None:
+            return None
+        return max(0.0, self._estimated_total - (time.monotonic() - self._t0))
 
     def set_estimated_total(self, seconds: float) -> None:
         """Tell the display the expected wall-clock duration of the whole run.
@@ -127,6 +166,11 @@ class Progress:
         actually wants to know mid-run.
         """
         self._estimated_total = max(1.0, float(seconds))
+        self._emit({
+            "type": "set_total",
+            "estimated_total": self._estimated_total,
+            "elapsed": time.monotonic() - self._t0,
+        })
 
     def _overall_pct(self, *, finished: bool = False) -> int:
         elapsed = time.monotonic() - self._t0
@@ -173,6 +217,17 @@ class Progress:
             f"(overall {overall_before}%{eta})",
             flush=True,
         )
+        self._emit({
+            "type": "phase_start",
+            "index": self._step_count,
+            "total": self._n_steps,
+            "key": key,
+            "label": label,
+            "overall": overall_before / 100.0,
+            "estimated_total": self._estimated_total,
+            "eta_seconds": self._remaining_seconds(),
+            "elapsed": time.monotonic() - self._t0,
+        })
         hb = None
         if spinner and self._spinner_enabled():
             hb = _Heartbeat(label, self)
@@ -193,6 +248,18 @@ class Progress:
                 f"(overall {overall_after}%{eta_after})",
                 flush=True,
             )
+            self._emit({
+                "type": "phase_end",
+                "index": self._step_count,
+                "total": self._n_steps,
+                "key": key,
+                "label": label,
+                "phase_elapsed": elapsed,
+                "overall": overall_after / 100.0,
+                "estimated_total": self._estimated_total,
+                "eta_seconds": self._remaining_seconds(),
+                "elapsed": time.monotonic() - self._t0,
+            })
 
     def iter(self, iterable, total: int | None = None, desc: str | None = None):
         """Wrap `iterable` in a tqdm bar when not verbose; passthrough otherwise.

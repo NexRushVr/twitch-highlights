@@ -6,6 +6,8 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-06-04
+
 ### Fixed
 - First run after a Windows install crashed with
   `JSONDecodeError: Expecting value: line 1 column 1 (char 0)` reading
@@ -31,6 +33,18 @@ versioning follows [SemVer](https://semver.org/).
   step explicitly, so benign stderr (e.g. Ollama's startup log) can't kill a run.
 
 ### Added
+- **Desktop GUI** (`gui.bat`, or a standalone `TwitchHighlights.exe` built with
+  `build_gui.ps1`): a lightweight pywebview app — no Node, no web server, no extra
+  language — that drives the same `pipeline.py`. Four tabs: **Make clips** (the
+  `run.bat` form plus a live 7-phase progress monitor with overall % + ETA),
+  **Results** (clip cards from `clips_manifest.json` with open-in-player /
+  open-folder), **Setup check** (`install.ps1 -Check` status), and **Settings**
+  (edit `config.json`, write/register the nightly Task Scheduler job). Live
+  monitoring uses a new opt-in `VOD_CLIP_PROGRESS_JSON` sink in
+  `modules/progress.py` that appends one JSON line per phase event; with the env
+  var unset the CLI's output is byte-for-byte unchanged. The exe is a thin
+  launcher — it runs the project's `.venv` against `pipeline.py`, so it stays
+  ~11 MB and every step remains an inspectable script.
 - Automatic source cleanup: after a successful run, the downloaded VOD, any
   windowed trim, and the derived `.wav` are deleted to reclaim multi-GB of
   disk. Default is on (`cleanup_source: true`); opt out with `--keep-vod` or

@@ -33,6 +33,12 @@ Not technical? This is the whole thing. You need a Windows PC with an NVIDIA gra
 
 That's it. To make more clips later, just double-click `run.bat` again.
 
+> **Prefer a window over a terminal?** Double-click **`gui.bat`** instead for a small
+> desktop app: pick a stream, watch the 7-phase progress live, browse the clips it made,
+> check your setup, and edit settings — all in one window. It runs the exact same scripts
+> under the hood. (First launch installs one extra package, `pywebview`.) You can also
+> build a standalone **`TwitchHighlights.exe`** with `build_gui.ps1` — see [Desktop app](#desktop-app).
+
 > Prefer to have an AI assistant do all of this for you? See [Install with an AI assistant](#install-with-an-ai-assistant-claude-etc) below.
 
 <details>
@@ -113,6 +119,33 @@ prompts/                          # base + per-mode LLM prompts (edit freely)
 ```
 
 The pipeline pulls the source VOD, transcribes the audio with Whisper, then picks clip windows from the transcript — either an **LLM** chooses the best moments (`reaction` / `dance` / `hype` / `all`), or a plain **transcript scan** finds every time you said a trigger phrase (`phrase`). Picks are cross-referenced against audio-loudness peaks, cut with ffmpeg, and get CapCut-style captions burned on top. The LLM-vs-phrase choice is just `--clip-mode`; everything downstream is identical.
+
+## Desktop app
+
+Don't want to touch a terminal? `twitch-highlights` ships a lightweight desktop UI in
+[`gui/`](gui/) that wraps the same pipeline — **no separate install, no Node, no cloud.**
+
+- **Run it now:** double-click **`gui.bat`** (first launch installs `pywebview` into the
+  existing `.venv`; nothing else changes).
+- **Make a real app with an icon:** `powershell -ExecutionPolicy Bypass -File build_gui.ps1`
+  produces `dist\TwitchHighlights\TwitchHighlights.exe`. Drop the exe at the repo root
+  (next to `.venv` / `pipeline.py`) and pin it to your taskbar. Needs the Microsoft Edge
+  **WebView2** runtime, which ships with Windows 11.
+
+Four tabs, all mirroring the CLI:
+
+| Tab | What it does |
+| --- | --- |
+| **Make clips** | The `run.bat` questions as a form (source, clip mode, max clips, time window, force), plus a **live 7-phase monitor** — current phase, overall %, and an ETA countdown. |
+| **Results** | Every past run from `clips_manifest.json`: clip cards with reason/score/length, "Open" (default player) and "Open folder". |
+| **Setup check** | Runs `install.ps1 -Check` and shows GPU / Ollama / ffmpeg / model status. Read-only. |
+| **Settings** | Edits `config.json` (advanced keys preserved), and writes/registers a nightly Task Scheduler job. |
+
+**It stays lightweight on purpose.** The GUI never reimplements anything — it shells out to
+`python pipeline.py …` exactly like `run.ps1`, and the pipeline streams structured progress
+back to the window via an opt-in `VOD_CLIP_PROGRESS_JSON` feed (`modules/progress.py`). With
+that env var unset, the CLI behaves byte-for-byte as before. Every step is still a script you
+can read and run by hand.
 
 ## Requirements
 

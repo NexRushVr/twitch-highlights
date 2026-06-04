@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Twitch Highlights</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">▶</div>
+      <div class="brand-text">
+        <strong>Twitch</strong><span>Highlights</span>
+      </div>
+    </div>
+    <nav class="nav">
+      <button class="nav-item active" data-view="run">  <span class="nav-ico">✦</span> Make clips</button>
+      <button class="nav-item" data-view="results"><span class="nav-ico">▣</span> Results</button>
+      <button class="nav-item" data-view="preflight"><span class="nav-ico">✓</span> Setup check</button>
+      <button class="nav-item" data-view="settings"><span class="nav-ico">⚙</span> Settings</button>
+    </nav>
+    <div class="sidebar-foot">
+      <div id="statusPill" class="pill pill-muted">Starting…</div>
+    </div>
+  </aside>
+
+  <main class="content">
+    <!-- ============================ RUN ============================ -->
+    <section class="view active" id="view-run">
+      <header class="view-head">
+        <h1>Make clips</h1>
+        <p class="sub">Pick a stream and let the pipeline cut captioned highlights.</p>
+      </header>
+
+      <div class="card">
+        <label class="field-label">Where is the stream?</label>
+        <div class="segmented" id="sourceSeg">
+          <button data-source="kick" class="active">Kick channel</button>
+          <button data-source="twitch">Twitch VOD link</button>
+          <button data-source="vodvod">vodvod.top</button>
+          <button data-source="local">Local file</button>
+        </div>
+
+        <div class="source-input" data-for="kick">
+          <label class="field-label" for="kickChannel">Kick channel name</label>
+          <input id="kickChannel" type="text" placeholder="e.g. abehamm" />
+          <p class="hint">Most reliable — Kick keeps VODs indefinitely.</p>
+        </div>
+        <div class="source-input hidden" data-for="twitch">
+          <label class="field-label" for="twitchUrl">Twitch VOD URL</label>
+          <input id="twitchUrl" type="text" placeholder="https://www.twitch.tv/videos/…" />
+          <p class="hint">Best for your own streams or still-live VODs.</p>
+        </div>
+        <div class="source-input hidden" data-for="vodvod">
+          <label class="field-label" for="vodvodChannel">vodvod.top handle</label>
+          <input id="vodvodChannel" type="text" placeholder="e.g. @eevi" />
+          <p class="hint">Twitch mirror — for expired Twitch VODs.</p>
+        </div>
+        <div class="source-input hidden" data-for="local">
+          <label class="field-label" for="localPath">Video file on this PC</label>
+          <div class="row">
+            <input id="localPath" type="text" placeholder="C:\…\last_stream.mp4" />
+            <button class="btn btn-ghost" id="browseBtn" type="button">Browse…</button>
+          </div>
+          <p class="hint">.mp4 / .ts / .mkv / .mov — nothing is re-downloaded.</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <label class="field-label">How should it choose the moments?</label>
+        <div class="row wrap">
+          <div class="grow">
+            <select id="clipMode">
+              <option value="all">AI picks the best moments (recommended)</option>
+              <option value="reaction">AI — funny reactions</option>
+              <option value="dance">AI — dance moments</option>
+              <option value="hype">AI — hype peaks</option>
+              <option value="music">Music peaks</option>
+              <option value="phrase">Only where I said a phrase</option>
+            </select>
+          </div>
+          <div id="maxClipsWrap" class="narrow">
+            <label class="field-label sm" for="maxClips">Max clips</label>
+            <input id="maxClips" type="number" min="1" max="100" value="10" />
+          </div>
+          <div id="phraseWrap" class="grow hidden">
+            <label class="field-label sm" for="triggerPhrase">Trigger phrase</label>
+            <input id="triggerPhrase" type="text" value="clip it" />
+          </div>
+        </div>
+
+        <details class="advanced">
+          <summary>Advanced</summary>
+          <div class="row wrap">
+            <div class="narrow">
+              <label class="field-label sm" for="startTime">Start time</label>
+              <input id="startTime" type="text" placeholder="e.g. 1:00:00" />
+            </div>
+            <div class="narrow">
+              <label class="field-label sm" for="endTime">End time</label>
+              <input id="endTime" type="text" placeholder="e.g. 1:30:00" />
+            </div>
+            <label class="check"><input type="checkbox" id="forceChk" /> Force re-run (ignore cached clips)</label>
+            <label class="check"><input type="checkbox" id="verboseChk" /> Verbose logging</label>
+          </div>
+        </details>
+      </div>
+
+      <div class="run-bar">
+        <button class="btn btn-primary" id="startBtn">Start</button>
+        <button class="btn btn-danger hidden" id="cancelBtn">Cancel</button>
+        <span id="runCmd" class="run-cmd"></span>
+      </div>
+
+      <!-- live monitor -->
+      <div class="card monitor hidden" id="monitor">
+        <div class="monitor-head">
+          <div class="overall">
+            <div class="overall-top">
+              <span id="phaseLabel">Starting…</span>
+              <span id="overallPct">0%</span>
+            </div>
+            <div class="progress"><div class="progress-fill" id="overallFill"></div></div>
+            <div class="overall-eta" id="etaLine"></div>
+          </div>
+        </div>
+        <ol class="phases" id="phaseList"></ol>
+        <div class="run-result hidden" id="runResult"></div>
+      </div>
+    </section>
+
+    <!-- ============================ RESULTS ============================ -->
+    <section class="view" id="view-results">
+      <header class="view-head">
+        <h1>Results</h1>
+        <p class="sub">Clips produced by past runs.</p>
+      </header>
+      <div class="card">
+        <div class="row wrap">
+          <div class="grow">
+            <label class="field-label sm" for="runSelect">Run</label>
+            <select id="runSelect"></select>
+          </div>
+          <button class="btn btn-ghost" id="refreshRuns">Refresh</button>
+          <button class="btn btn-ghost" id="openRunFolder">Open folder</button>
+        </div>
+      </div>
+      <div id="resultsGrid" class="results-grid"></div>
+      <div id="resultsEmpty" class="empty hidden">No clips yet — make some on the “Make clips” tab.</div>
+    </section>
+
+    <!-- ============================ PREFLIGHT ============================ -->
+    <section class="view" id="view-preflight">
+      <header class="view-head">
+        <h1>Setup check</h1>
+        <p class="sub">Confirms GPU, Ollama, ffmpeg and the model are ready. Changes nothing.</p>
+      </header>
+      <div class="run-bar">
+        <button class="btn btn-primary" id="recheckBtn">Run check</button>
+        <span id="preflightVerdict" class="run-cmd"></span>
+      </div>
+      <div id="preflightList" class="check-list"></div>
+    </section>
+
+    <!-- ============================ SETTINGS ============================ -->
+    <section class="view" id="view-settings">
+      <header class="view-head">
+        <h1>Settings</h1>
+        <p class="sub">Edits <code>config.json</code>. Advanced keys are preserved untouched.</p>
+      </header>
+
+      <div class="card">
+        <h2 class="card-title">Defaults</h2>
+        <div class="grid2">
+          <div><label class="field-label sm">Whisper model</label>
+            <select id="cfg-whisper_model">
+              <option>large-v3</option><option>medium</option><option>small</option>
+              <option>base</option><option>tiny</option>
+            </select></div>
+          <div><label class="field-label sm">Whisper device</label>
+            <select id="cfg-whisper_device"><option>cuda</option><option>cpu</option></select></div>
+          <div><label class="field-label sm">LLM backend</label>
+            <select id="cfg-llm_backend"><option>ollama</option><option>openai</option></select></div>
+          <div><label class="field-label sm">Ollama model</label>
+            <input id="cfg-ollama_model" type="text" /></div>
+          <div><label class="field-label sm">OpenAI model</label>
+            <input id="cfg-openai_model" type="text" /></div>
+          <div><label class="field-label sm">Default clip mode</label>
+            <select id="cfg-clip_mode">
+              <option>all</option><option>reaction</option><option>dance</option>
+              <option>hype</option><option>music</option><option>phrase</option>
+            </select></div>
+          <div><label class="field-label sm">Trigger phrase</label>
+            <input id="cfg-trigger_phrase" type="text" /></div>
+          <div><label class="field-label sm">Max clips</label>
+            <input id="cfg-max_clips" type="number" min="1" max="100" /></div>
+          <div><label class="field-label sm">Download quality</label>
+            <select id="cfg-quality"><option>best</option><option>1080p</option><option>720p</option><option>480p</option></select></div>
+        </div>
+        <div class="row wrap checks">
+          <label class="check"><input type="checkbox" id="cfg-burn_subtitles" /> Burn captions</label>
+          <label class="check"><input type="checkbox" id="cfg-cleanup_source" /> Clean up source after run</label>
+          <label class="check"><input type="checkbox" id="cfg-verbose" /> Verbose logging</label>
+        </div>
+        <div class="run-bar">
+          <button class="btn btn-primary" id="saveCfgBtn">Save settings</button>
+          <span id="cfgMsg" class="run-cmd"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">Nightly automatic runs</h2>
+        <p class="hint">Writes <code>nightly.ps1</code> and (optionally) registers a daily Task Scheduler job.</p>
+        <div class="grid2">
+          <div><label class="field-label sm">vodvod channels (one per line)</label>
+            <textarea id="nl-vodvod" rows="3" placeholder="@eevi&#10;@shroud"></textarea></div>
+          <div><label class="field-label sm">Kick channels (one per line)</label>
+            <textarea id="nl-kick" rows="3" placeholder="abehamm"></textarea></div>
+          <div><label class="field-label sm">Run at (HH:MM, 24h)</label>
+            <input id="nl-time" type="text" value="03:00" /></div>
+          <div><label class="field-label sm">Max clips per run</label>
+            <input id="nl-max" type="number" min="1" max="100" value="10" /></div>
+        </div>
+        <div class="run-bar">
+          <button class="btn btn-ghost" id="writeNightlyBtn">Write script only</button>
+          <button class="btn btn-primary" id="registerNightlyBtn">Register daily task</button>
+          <button class="btn btn-danger hidden" id="unregisterNightlyBtn">Remove task</button>
+        </div>
+        <div id="nightlyMsg" class="nightly-msg"></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="app.js"></script>
+</body>
+</html>

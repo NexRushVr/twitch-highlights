@@ -1,0 +1,10 @@
+# Desktop GUI runtime dependency. The GUI reuses the project's .venv and shells
+# out to pipeline.py, so this is the *only* extra runtime package it needs.
+#
+# pywebview's Windows backend additionally pulls pythonnet + clr-loader (to talk
+# to the Edge WebView2 runtime, which ships with Windows 11).
+pywebview>=5.0
+
+# --- build only (packaging the .exe; not needed to run from source) ---
+# Installed on demand by build_gui.ps1:
+#   pyinstaller>=6.0
