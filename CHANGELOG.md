@@ -6,6 +6,8 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-06-04
+
 ### Added
 - GUI: live source-download feedback. During "Resolving source" the app now shows
   "Found VOD …" then a live "Downloading &lt;MB&gt; · &lt;MB/s&gt;" line and keeps the
