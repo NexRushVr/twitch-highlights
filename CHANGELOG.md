@@ -6,6 +6,8 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-06-04
+
 ### Added
 - **AVIF target-size mode.** Aim each clip's AVIF *under a chosen size* (e.g. ≤10 MB
   for Discord) instead of a fixed quality, using AvifTools' new `-TargetSizeMB`
