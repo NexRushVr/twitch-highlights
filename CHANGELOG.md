@@ -6,6 +6,8 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-06-04
+
 ### Changed
 - **Runtime estimate / ETA is far more accurate and self-calibrating.** The old
   `duration × 0.15` (set after the download) routinely hit "0 left" with the job
