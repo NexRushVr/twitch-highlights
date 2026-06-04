@@ -207,4 +207,8 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
   padding: 11px 18px; border-radius: 9px; box-shadow: var(--shadow); z-index: 50;
   font-size: 13.5px; transition: opacity .2s;
 }
+.avif-toggle { margin-top: 14px; padding-top: 13px; border-top: 1px solid var(--line); align-items: flex-start; }
+.hint.inline { color: var(--muted); font-size: 12px; font-weight: 400; margin: 0 0 0 4px; }
+.avif-row { margin-top: 12px; align-items: center; }
+
 .hidden { display: none !important; }

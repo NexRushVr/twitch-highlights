@@ -17,6 +17,7 @@ import json
 import os
 import re
 import subprocess
+import threading
 
 import paths
 from runner import VALID_MODES, VALID_SOURCES, PipelineRunner
@@ -50,6 +51,7 @@ class JsApi:
         self._window = None         # set by app.py after create_window
         self._alive = True
         self._runner = PipelineRunner(emit=self._push)
+        self._avif_busy = False
 
     # -- window plumbing (called from app.py, not from JS) ------------------
 
@@ -194,6 +196,64 @@ class JsApi:
     def run_meta(self) -> dict:
         """Static options for the run form (kept in sync with the pipeline)."""
         return {"sources": list(VALID_SOURCES), "modes": list(VALID_MODES)}
+
+    # -- on-demand AVIF export ---------------------------------------------
+
+    def export_avif(self, manifest: str, source: str = "raw") -> dict:
+        """Encode a finished run's clips to AVIF on demand (the 'also make the
+        clean/non-captioned ones' button). Runs in the background and pushes
+        avif_progress / avif_done events. Reuses the venv + modules/avif_exporter."""
+        if not manifest or not os.path.isfile(manifest):
+            return {"status": "error", "message": "Run not found."}
+        if source not in ("captioned", "raw"):
+            source = "raw"
+        if self._avif_busy or self._runner.is_running():
+            return {"status": "busy", "message": "Already busy — wait for the current job."}
+        self._avif_busy = True
+        threading.Thread(target=self._run_avif, args=(manifest, source),
+                         daemon=True).start()
+        return {"status": "started", "source": source}
+
+    def _run_avif(self, manifest: str, source: str) -> None:
+        out_dir = None
+        try:
+            cmd = [paths.venv_python(), "-u",
+                   os.path.join(paths.app_dir(), "modules", "avif_exporter.py"),
+                   "--manifest", manifest, "--source", source]
+            env = os.environ.copy()
+            env["PYTHONIOENCODING"] = "utf-8"
+            env["PYTHONUTF8"] = "1"
+            proc = subprocess.Popen(
+                cmd, cwd=paths.app_dir(), env=env,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace",
+                creationflags=_CREATE_NO_WINDOW,
+            )
+            for line in proc.stdout:
+                line = line.rstrip()
+                if line.startswith("AVIFPROGRESS"):
+                    parts = line.split()
+                    done = total = 0
+                    if len(parts) >= 2 and "/" in parts[1]:
+                        try:
+                            done, total = (int(x) for x in parts[1].split("/", 1))
+                        except ValueError:
+                            pass
+                    self._push({"type": "avif_progress", "done": done, "total": total,
+                                "label": parts[2] if len(parts) >= 3 else "",
+                                "source": source})
+                elif line.startswith("AVIFDONE"):
+                    idx = line.find("-> ")
+                    if idx != -1:
+                        out_dir = line[idx + 3:].strip()
+            rc = proc.wait()
+            self._push({"type": "avif_done", "returncode": rc,
+                        "out_dir": out_dir, "source": source})
+        except OSError as e:
+            self._push({"type": "avif_done", "returncode": -1,
+                        "error": str(e), "source": source})
+        finally:
+            self._avif_busy = False
 
     # -- results ------------------------------------------------------------
 

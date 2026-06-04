@@ -17,6 +17,7 @@ const PHASES = [
   { key: 'clip', label: 'Cutting clips' },
   { key: 'caption', label: 'Burning captions' },
 ];
+const AVIF_PHASE = { key: 'avif', label: 'Exporting AVIFs' };
 
 let currentSource = 'kick';
 let currentRunDir = null;
@@ -27,7 +28,12 @@ const run = {
   virtualT0: null,
   lastOverall: 0,
   timer: null,
+  hasAvif: false,
 };
+
+function phaseList() {
+  return run.hasAvif ? [...PHASES, AVIF_PHASE] : PHASES;
+}
 
 /* ------------------------------------------------------------------ utils */
 function fmt(sec) {
@@ -110,15 +116,18 @@ function gatherOpts() {
   else if (currentSource === 'local') opts.path = $('localPath').value;
   if (mode === 'phrase') opts.trigger_phrase = $('triggerPhrase').value;
   else opts.max_clips = parseInt($('maxClips').value, 10) || 10;
+  opts.avif = $('avifChk').checked;
   return opts;
 }
 
 async function startRun() {
-  const res = await api().start_run(gatherOpts());
+  const opts = gatherOpts();
+  const res = await api().start_run(opts);
   if (res.status !== 'started') {
     toast(res.message || 'Could not start.');
     return;
   }
+  run.hasAvif = !!opts.avif;     // adds the 8th phase row to the tracker
   enterRunningUI(res.command);
 }
 
@@ -150,7 +159,7 @@ function enterRunningUI(command) {
 function renderPhases(activeIndex) {
   const ol = $('phaseList');
   ol.innerHTML = '';
-  PHASES.forEach((p, i) => {
+  phaseList().forEach((p, i) => {
     const idx = i + 1;
     let state = 'pending';
     if (idx < activeIndex) state = 'done';
@@ -217,6 +226,23 @@ window.onProgress = function (ev) {
         $('etaLine').textContent = ev.detail ? `${ev.message} — ${ev.detail}` : ev.message;
       }
       break;
+    case 'avif_progress':
+      $('avifStatus').textContent =
+        `Encoding AVIFs ${ev.done}/${ev.total}` + (ev.label ? ` — ${ev.label}` : '');
+      break;
+    case 'avif_done':
+      $('avifCaptioned').disabled = false;
+      $('avifClean').disabled = false;
+      if (ev.returncode === 0) {
+        $('avifStatus').textContent =
+          `Done ✓ — ${ev.source === 'captioned' ? 'avif/' : 'avif-clean/'}`;
+        if (ev.out_dir) api().open_path(ev.out_dir);
+        loadRuns();
+      } else {
+        $('avifStatus').textContent =
+          'AVIF export failed' + (ev.error ? `: ${ev.error}` : ` (exit ${ev.returncode})`);
+      }
+      break;
     case 'run_end':
       endRun(ev);
       break;
@@ -226,6 +252,15 @@ window.onProgress = function (ev) {
 function markPhase(index, label) {
   $('phaseLabel').textContent = label ? label + '…' : 'Working…';
   const ol = $('phaseList');
+  if (!ol.querySelector(`.phase[data-idx="${index}"]`)) {
+    // Event references a phase we didn't pre-render (e.g. AVIF when the run
+    // form's avif box state didn't reach us). Append it so it still shows.
+    const li = document.createElement('li');
+    li.className = 'phase';
+    li.dataset.idx = index;
+    li.innerHTML = `<span class="dot"></span><span class="plabel">${label || ''}</span><span class="ptime"></span>`;
+    ol.appendChild(li);
+  }
   ol.querySelectorAll('.phase').forEach((li) => {
     const idx = parseInt(li.dataset.idx, 10);
     if (idx < index) {
@@ -333,6 +368,23 @@ $('refreshRuns').addEventListener('click', loadRuns);
 $('openRunFolder').addEventListener('click', async () => {
   if (currentRunDir) await api().open_containing(currentRunDir);
 });
+
+$('avifCaptioned').addEventListener('click', () => exportAvif('captioned'));
+$('avifClean').addEventListener('click', () => exportAvif('raw'));
+
+async function exportAvif(source) {
+  const manifest = $('runSelect').value;
+  if (!manifest) { toast('Pick a run first.'); return; }
+  $('avifCaptioned').disabled = true;
+  $('avifClean').disabled = true;
+  $('avifStatus').textContent = 'Starting AVIF export… (first run may install AvifTools)';
+  const res = await api().export_avif(manifest, source);
+  if (res.status !== 'started') {
+    $('avifStatus').textContent = res.message || 'Could not start.';
+    $('avifCaptioned').disabled = false;
+    $('avifClean').disabled = false;
+  }
+}
 
 async function loadResults(manifest) {
   const data = await api().load_results(manifest);

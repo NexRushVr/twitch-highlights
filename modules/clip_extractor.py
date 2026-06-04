@@ -1,5 +1,6 @@
-import subprocess
 import os
+import secrets
+import subprocess
 
 
 ATTRIBUTION_COMMENT = (
@@ -51,10 +52,31 @@ def extract_clip(
     return out_path
 
 
-def batch_extract(video_path: str, clips: list, config: dict, progress=None) -> list:
+def clip_name_prefix(config: dict, streamer: str | None = None) -> str:
+    """Filename prefix for clips: the streamer/channel handle when we have one,
+    else a generic fallback. Derives from config when `streamer` isn't passed."""
+    s = (streamer or "").strip().lstrip("@")
+    if not s:
+        st = config.get("source_type")
+        if st == "vodvod":
+            s = config.get("vodvod_channel", "").lstrip("@")
+        elif st == "kick":
+            s = config.get("kick_channel", "").lstrip("@")
+    return s or "highlight"
+
+
+def batch_extract(video_path: str, clips: list, config: dict, progress=None,
+                  streamer: str | None = None) -> list:
     os.makedirs(config["output_dir"], exist_ok=True)
     output_files = []
     quiet = not bool(config.get("verbose", False))
+
+    # Clips are named "<streamer>-<random>.mp4" (the reason/score live in the
+    # manifest meta + embedded mp4 metadata, so no info is lost). The random
+    # token gives each highlight a short, shareable identity that its captioned
+    # variant and AVIF exports reuse.
+    prefix = clip_name_prefix(config, streamer)
+    used = set()
 
     iterable = enumerate(clips)
     if progress is not None:
@@ -62,7 +84,11 @@ def batch_extract(video_path: str, clips: list, config: dict, progress=None) -> 
 
     for i, clip in iterable:
         reason = clip.get("reason", "clip")
-        fname = f"clip_{i + 1:03d}_{reason}.mp4"
+        token = secrets.token_hex(3)
+        while token in used:
+            token = secrets.token_hex(3)
+        used.add(token)
+        fname = f"{prefix}-{token}.mp4"
         out = os.path.join(config["output_dir"], fname)
         extract_clip(
             video_path,

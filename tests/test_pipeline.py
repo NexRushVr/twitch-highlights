@@ -268,7 +268,7 @@ def test_run_phrase_mode_does_not_truncate_to_max_clips(tmp_path, sample_segment
          patch("pipeline.select_highlights", return_value=many) as mock_sel, \
          patch("pipeline.get_audio_peaks", return_value=[]), \
          patch("pipeline.batch_extract",
-               side_effect=lambda vp, clips, c, progress=None: [{"file": clip_file, "meta": cl} for cl in clips]) as mock_extract:
+               side_effect=lambda vp, clips, c, progress=None, streamer=None: [{"file": clip_file, "meta": cl} for cl in clips]) as mock_extract:
         run(cfg)
 
     # select_highlights got the phrase config; batch_extract received all 6,
@@ -310,7 +310,7 @@ def test_run_reaction_mode_still_truncates_to_max_clips(tmp_path, sample_segment
          patch("pipeline.select_highlights", return_value=many), \
          patch("pipeline.get_audio_peaks", return_value=[]), \
          patch("pipeline.batch_extract",
-               side_effect=lambda vp, clips, c, progress=None: [{"file": clip_file, "meta": cl} for cl in clips]) as mock_extract:
+               side_effect=lambda vp, clips, c, progress=None, streamer=None: [{"file": clip_file, "meta": cl} for cl in clips]) as mock_extract:
         run(cfg)
 
     extracted_clips = mock_extract.call_args[0][1]

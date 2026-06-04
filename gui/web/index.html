@@ -105,6 +105,11 @@
             <label class="check"><input type="checkbox" id="verboseChk" /> Verbose logging</label>
           </div>
         </details>
+
+        <label class="check avif-toggle"><input type="checkbox" id="avifChk" />
+          Also export Discord <strong>AVIFs</strong> — tiny looping clips, from the captioned cuts
+          <span class="hint inline">(adds an 8th step; uses your AvifTools repo)</span>
+        </label>
       </div>
 
       <div class="run-bar">
@@ -144,6 +149,12 @@
           </div>
           <button class="btn btn-ghost" id="refreshRuns">Refresh</button>
           <button class="btn btn-ghost" id="openRunFolder">Open folder</button>
+        </div>
+        <div class="row wrap avif-row">
+          <span class="field-label sm">Make AVIFs (Discord):</span>
+          <button class="btn btn-ghost" id="avifCaptioned">From captioned</button>
+          <button class="btn btn-ghost" id="avifClean">From clean cuts</button>
+          <span id="avifStatus" class="run-cmd"></span>
         </div>
       </div>
       <div id="resultsGrid" class="results-grid"></div>

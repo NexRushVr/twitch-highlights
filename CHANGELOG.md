@@ -6,6 +6,25 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **AVIF export.** Optionally encode each finished clip to two small, animated
+  AVIFs for Discord, via the AvifTools module
+  (github.com/NexRushVr/optimized-discord-gifs-avif — auto-installed/imported on
+  first use, no reimplementation): `<streamer>-<rand>-not.avif` (high quality,
+  480p60) and `<streamer>-<rand>-opt.avif` (optimized, 480p30 — ~2-3× smaller).
+  CLI: `--avif` / `--avif-source {captioned,raw}`; config: `avif_export` plus
+  `avif_max_width` / `avif_hq_crf|fps` / `avif_opt_crf|fps` / `avif_preset`. GUI:
+  an "Also export Discord AVIFs" toggle on the run form (adds an 8th progress
+  phase), and per-run "From captioned / From clean cuts" buttons in Results.
+
+### Changed
+- **Clip filenames are now `<streamer>-<random>.mp4`** (e.g. `abehamm-a3f9c1.mp4`)
+  instead of `clip_NNN_<reason>.mp4`. The reason and score still live in the
+  manifest and the embedded mp4 metadata, so nothing is lost — the new name gives
+  each highlight a short, shareable identity that its `_captioned` variant and its
+  AVIF exports reuse (`abehamm-a3f9c1-opt.avif`). Falls back to a `highlight-`
+  prefix when no channel/streamer is known (local files, raw m3u8).
+
 ## [1.1.2] - 2026-06-04
 
 ### Added

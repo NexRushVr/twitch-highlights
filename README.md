@@ -358,6 +358,23 @@ python pipeline.py --source-type local --path "./last_stream.mp4" \
 
 > Tip: this still downloads + transcribes the whole VOD. A future enhancement could fetch audio-only for the transcript, then range-download just the clip windows — open an issue if you want that.
 
+### Discord AVIFs (`--avif`)
+
+Add `--avif` to also encode each clip into two small, looping **animated AVIFs** — the modern, far-smaller replacement for GIFs that Discord plays inline:
+
+```bash
+python pipeline.py --source-type kick --channel abehamm --clip-mode all --avif
+```
+
+Each highlight `abehamm-a3f9c1.mp4` yields, in `clips/<streamer>/<date>/avif/`:
+
+- **`abehamm-a3f9c1-not.avif`** — high quality (480p, 60fps, low CRF — "not optimized")
+- **`abehamm-a3f9c1-opt.avif`** — optimized (480p, 30fps — typically ~2–3× smaller, drops straight into chat)
+
+By default it encodes the captioned clip; `--avif-source raw` uses the clean cut instead. Tuning lives in `config.json` (`avif_max_width`, `avif_hq_crf`/`avif_hq_fps`, `avif_opt_crf`/`avif_opt_fps`, `avif_preset`). In the **desktop GUI**, tick *"Also export Discord AVIFs"* on the run form, or use the Results-tab *"From captioned / From clean cuts"* buttons after a run.
+
+The encoding is done by the **[AvifTools](https://github.com/NexRushVr/optimized-discord-gifs-avif)** module (SVT-AV1 via ffmpeg, CPU — no GPU needed), which is auto-installed/imported on first use. Requires an ffmpeg built with `libsvtav1` (`ffmpeg -encoders | grep svtav1`).
+
 ### Time window details
 
 `--start-time` and `--end-time` accept `HH:MM:SS`, `MM:SS`, or bare seconds (`3600`). Either may be omitted; the missing one defaults to "start of video" or "end of video" respectively.

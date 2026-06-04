@@ -95,25 +95,44 @@ def test_batch_extract_returns_file_and_meta(tmp_path, sample_clips, base_config
         assert "meta" in item
 
 
-def test_batch_extract_filenames_include_reason(tmp_path, sample_clips, base_config):
+def test_batch_extract_filenames_use_streamer_random(tmp_path, sample_clips, base_config):
+    """Clips are named <prefix>-<6-hex>.mp4 (prefix = 'highlight' for twitch).
+    The reason lives in meta + embedded metadata, not the filename."""
+    import re
     base_config["output_dir"] = str(tmp_path / "clips")
     with patch("modules.clip_extractor.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0)
         result = batch_extract("/video.mp4", sample_clips, base_config)
 
     for item in result:
-        assert item["meta"]["reason"] in item["file"]
+        name = os.path.basename(item["file"])
+        assert re.fullmatch(r"highlight-[0-9a-f]{6}\.mp4", name), name
+        # reason is preserved in meta, just not in the filename
+        assert "reason" in item["meta"]
 
 
-def test_batch_extract_filenames_are_numbered(tmp_path, sample_clips, base_config):
+def test_batch_extract_prefix_uses_channel_for_kick_vodvod(tmp_path, sample_clips, base_config):
+    import re
+    base_config["output_dir"] = str(tmp_path / "clips")
+    base_config["source_type"] = "kick"
+    base_config["kick_channel"] = "@abehamm"
+    with patch("modules.clip_extractor.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0)
+        result = batch_extract("/video.mp4", sample_clips, base_config)
+
+    for item in result:
+        # leading "@" stripped; prefix is the channel slug
+        assert re.fullmatch(r"abehamm-[0-9a-f]{6}\.mp4", os.path.basename(item["file"]))
+
+
+def test_batch_extract_filenames_are_unique(tmp_path, sample_clips, base_config):
     base_config["output_dir"] = str(tmp_path / "clips")
     with patch("modules.clip_extractor.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0)
         result = batch_extract("/video.mp4", sample_clips, base_config)
 
-    assert "001" in result[0]["file"]
-    assert "002" in result[1]["file"]
-    assert "003" in result[2]["file"]
+    names = [os.path.basename(r["file"]) for r in result]
+    assert len(set(names)) == len(names)  # random tokens are unique
 
 
 def test_batch_extract_passes_padding_from_config(tmp_path, base_config):

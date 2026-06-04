@@ -62,6 +62,21 @@ DEFAULT_CONFIG = {
     "output_dir": "./clips",
     "burn_subtitles": True,
 
+    # AVIF export — encode finished clips to small, Discord-friendly animated
+    # AVIFs using the AvifTools module (github.com/NexRushVr/optimized-discord-gifs-avif),
+    # which is auto-installed/imported on first use. Each clip yields two files:
+    #   <streamer>-<rand>-not.avif  high quality (480p60, low CRF — "not optimized")
+    #   <streamer>-<rand>-opt.avif  optimized   (480p30, higher CRF — small for chat)
+    "avif_export": False,             # also export AVIFs after a run
+    "avif_source": "captioned",       # "captioned" | "raw" — which clip to encode
+    "avif_max_width": 854,            # downscale cap in px (854 ≈ 480p for 16:9)
+    "avif_hq_crf": 18,                # "-not" (high quality) CRF (lower = better)
+    "avif_hq_fps": 60,                # "-not" frame rate
+    "avif_opt_crf": 30,               # "-opt" (optimized) CRF
+    "avif_opt_fps": 30,               # "-opt" frame rate
+    "avif_preset": 6,                 # SVT-AV1 speed/quality (0 slow/best .. 13 fast)
+    "avif_module_path": "",           # optional explicit path to the AvifTools module
+
     # Disk cleanup — after a successful run, delete the downloaded VOD, any
     # windowed trim, and the derived WAV to reclaim multi-GB of space. The
     # transcript JSON is kept (it's small and lets re-runs skip Whisper if you

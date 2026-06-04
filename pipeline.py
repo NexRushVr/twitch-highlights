@@ -18,7 +18,7 @@ from modules.transcriber import transcribe
 from modules.highlight_selector import select_highlights, top_up_with_music_peaks
 from modules.clip_extractor import batch_extract
 from modules.subtitle_burner import caption_clip
-from modules.progress import Progress, fmt_seconds
+from modules.progress import DEFAULT_PHASE_WEIGHTS, Progress, fmt_seconds
 
 
 def _streamer_subdir(cfg: dict) -> str:
@@ -136,7 +136,10 @@ def run(cfg: dict = None) -> list:
 
     verbose = bool(cfg.get("verbose", False))
     quiet = not verbose
-    progress = Progress(verbose=verbose)
+    weights = dict(DEFAULT_PHASE_WEIGHTS)
+    if cfg.get("avif_export"):
+        weights["avif"] = 0.04   # adds an 8th phase to the overall-% display
+    progress = Progress(verbose=verbose, weights=weights)
 
     # Step 1: Resolve source (per-VOD-date cache) + optional time-window trim
     with progress.phase("source", "Resolving source"):
@@ -315,7 +318,7 @@ def run(cfg: dict = None) -> list:
     # Step 6: Extract clips
     # spinner=False: batch_extract drives its own per-clip tqdm bar.
     with progress.phase("clip", "Cutting clips with FFmpeg", spinner=False):
-        extracted = batch_extract(video_path, clips, cfg, progress=progress)
+        extracted = batch_extract(video_path, clips, cfg, progress=progress, streamer=streamer)
 
     # Step 7: Captioned variant (CapCut-style burned-in subtitles)
     if cfg.get("burn_subtitles", True):
@@ -335,6 +338,33 @@ def run(cfg: dict = None) -> list:
                     print(f"    captioning failed for {item['file']}: {type(e).__name__}: {e}")
     else:
         print("[7/7] Skipping captions (burn_subtitles disabled).")
+
+    # Optional AVIF export — encode finished clips to Discord-friendly animated
+    # AVIFs via the AvifTools module (auto-installed on first use). Each clip ->
+    # <streamer>-<rand>-not.avif (high-q 480p60) + <streamer>-<rand>-opt.avif.
+    if cfg.get("avif_export"):
+        from modules.avif_exporter import clips_from_manifest, export_clips_to_avif
+        with progress.phase("avif", "Exporting AVIFs (AvifTools)", spinner=False):
+            avif_source = cfg.get("avif_source", "captioned")
+            clip_files = clips_from_manifest(extracted, avif_source)
+            avif_dir = os.path.join(
+                cfg["output_dir"], "avif" if avif_source == "captioned" else "avif-clean")
+
+            def _avif_prog(done, total, label):
+                progress.sub("Exporting AVIFs",
+                             fraction=(done / total if total else None), detail=label)
+
+            avif_results = export_clips_to_avif(clip_files, avif_dir, cfg, on_progress=_avif_prog)
+            by_name = {r["name"]: r for r in avif_results}
+            for item in extracted:
+                base = os.path.splitext(
+                    os.path.basename(item.get("captioned") or item.get("file") or ""))[0]
+                if base.endswith("_captioned"):
+                    base = base[: -len("_captioned")]
+                if base in by_name:
+                    item["avif"] = {"opt": by_name[base]["opt"], "not": by_name[base]["not"]}
+            made = sum(1 for r in avif_results for k in ("opt", "not") if r.get(k))
+            print(f"    Exported {made} AVIFs -> {avif_dir}")
 
     # Save manifest
     os.makedirs(cfg["output_dir"], exist_ok=True)
@@ -393,6 +423,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
                         "(default: delete to reclaim disk; transcript JSON is always kept)")
     p.add_argument("--verbose", action="store_true",
                    help="Show full subprocess output and per-chunk LLM logs (default: compact progress display)")
+    p.add_argument("--avif", action="store_true",
+                   help="Also export each clip to Discord-friendly animated AVIFs "
+                        "(<streamer>-<rand>-not/opt.avif) via the AvifTools module")
+    p.add_argument("--avif-source", choices=["captioned", "raw"],
+                   help="Which clip to encode to AVIF (default: captioned)")
     return p
 
 
@@ -443,5 +478,9 @@ if __name__ == "__main__":
         cfg["cleanup_source"] = False
     if args.verbose:
         cfg["verbose"] = True
+    if args.avif:
+        cfg["avif_export"] = True
+    if args.avif_source:
+        cfg["avif_source"] = args.avif_source
 
     run(cfg)

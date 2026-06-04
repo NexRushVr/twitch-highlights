@@ -72,6 +72,16 @@ Full table is in `README.md` under "Config reference".
 - "Run it automatically every night" -> create a `nightly.ps1` (see
   `nightly.example.ps1`) and register it with Windows Task Scheduler (the example
   file documents the `schtasks` command). Note: `nightly.ps1` is git-ignored.
+- "Also make Discord AVIFs" -> add `--avif` (or tick "Also export Discord AVIFs"
+  in the GUI; or use the Results-tab buttons after a run). Each clip ->
+  `<streamer>-<rand>-not.avif` (HQ 480p60) + `-opt.avif` (small 480p30), written to
+  `clips/<streamer>/<date>/avif/`. Encoding is the AvifTools module
+  (`scripts/avif_export.ps1` + `modules/avif_exporter.py`), auto-installed from
+  github.com/NexRushVr/optimized-discord-gifs-avif on first use. Needs ffmpeg with
+  `libsvtav1`.
+
+Note: clip files are named `<streamer>-<random>.mp4` (e.g. `abehamm-a3f9c1.mp4`),
+not `clip_NNN_<reason>.mp4`. The reason/score are in the manifest + mp4 metadata.
 
 ## Verify / troubleshoot
 - `.\.venv\Scripts\python.exe -c "import torch;print(torch.cuda.is_available())"` -> must be `True` for GPU.
