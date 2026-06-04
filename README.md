@@ -201,10 +201,16 @@ playwright install chromium      # only needed for the vodvod.top scraper
 `pip install openai-whisper` pulls in `torch` from PyPI, which on Windows/Linux installs the **CPU-only** wheel by default. To actually use your NVIDIA GPU you need a CUDA-enabled torch build. Install it *before* the rest:
 
 ```bash
-# CUDA 12.1 wheels (check https://pytorch.org/get-started/locally/ for your CUDA version)
-pip install torch --index-url https://download.pytorch.org/whl/cu121
+# CUDA 12.8 wheels — carry kernels for Maxwell through Blackwell (incl. RTX
+# 50-series). Check https://pytorch.org/get-started/locally/ for your CUDA version.
+pip install torch --index-url https://download.pytorch.org/whl/cu128
 pip install -r requirements.txt
 ```
+
+> **RTX 50-series (Blackwell) note:** older `cu121` torch installs fine and even
+> reports `torch.cuda.is_available() == True`, but every CUDA kernel then fails at
+> runtime ("no kernel image is available"). Use the `cu128` index above. The
+> Windows installer (`install.ps1`) does this automatically.
 
 If you don't have a GPU, override the device:
 

@@ -116,6 +116,17 @@ function Test-OllamaModel($model) {
     } catch { return $false }
 }
 
+# True only if a real CUDA *kernel* actually launches. We do NOT trust
+# torch.cuda.is_available(): on a GPU newer than the installed wheels (e.g.
+# Blackwell / RTX 50-series running cu121 torch) it returns True, then every
+# kernel dies at runtime with "no kernel image is available for execution".
+# Running one tiny op is the only honest test.
+function Test-CudaWorks($py) {
+    if (-not (Test-Path $py)) { return $false }
+    & $py -c "import torch; torch.randn(8, device='cuda').sum().item()" 2>$null | Out-Null
+    return ($LASTEXITCODE -eq 0)
+}
+
 $venvPy = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 
 # A stale PYTHONHOME / PYTHONPATH makes a freshly-located Python look for its
@@ -167,11 +178,10 @@ if ($Check) {
         & $venvPy -c "import whisper, torch" 2>$null
         if ($?) { Write-Ok "Python dependencies importable" }
         else { Write-Warn2 "deps not fully installed yet -> would run pip install -r requirements.txt" }
-        $cuda = (& $venvPy -c "import torch;print(torch.cuda.is_available())" 2>$null)
-        if ($cuda -eq "True") { Write-Ok "CUDA PyTorch active" }
-        else { Write-Warn2 "CUDA PyTorch not active -> would install GPU torch (update NVIDIA driver if it stays CPU)" }
+        if (Test-CudaWorks $venvPy) { Write-Ok "CUDA PyTorch active" }
+        else { Write-Warn2 "CUDA PyTorch not active -> would (re)install GPU torch (cu128). Update your NVIDIA driver if it stays CPU." }
     } else {
-        Write-Would "create .venv, install CUDA PyTorch (~2.5 GB) + deps + Playwright Chromium"
+        Write-Would "create .venv, install CUDA PyTorch (~2.7 GB) + deps + Playwright Chromium"
     }
 
     Write-Step "GPU and model selection"
@@ -299,17 +309,17 @@ Write-Ok "pip upgraded"
 #    CPU-only wheel and the GPU silently goes unused).
 # ---------------------------------------------------------------------------
 Write-Step "Installing GPU (CUDA) PyTorch"
-& $venvPy -c "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)" 2>$null
-$cudaOk = ($LASTEXITCODE -eq 0)
-if ($cudaOk) {
+if (Test-CudaWorks $venvPy) {
     Write-Ok "CUDA-enabled PyTorch already present"
 } else {
-    Write-Info "Downloading CUDA 12.1 PyTorch wheels (this is the big one ~2.5 GB)..."
-    & $venvPy -m pip install torch --index-url https://download.pytorch.org/whl/cu121
-    & $venvPy -c "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)" 2>$null
-    $cudaOk = ($LASTEXITCODE -eq 0)
-    if ($cudaOk) { Write-Ok "CUDA PyTorch installed" }
-    else { Write-Warn2 "PyTorch installed but torch.cuda.is_available() is False. Update your NVIDIA driver; the pipeline will fall back to CPU (slow) until then." }
+    # cu128 wheels ship kernels for Maxwell..Blackwell (sm_50..sm_120), so this
+    # one index covers new RTX 50-series cards *and* older GPUs. (The previous
+    # cu121 build installed fine on 50-series but couldn't launch any kernel.)
+    # --upgrade so an existing cu121 torch from an older install is replaced.
+    Write-Info "Downloading CUDA 12.8 PyTorch wheels (this is the big one ~2.7 GB)..."
+    & $venvPy -m pip install --upgrade torch --index-url https://download.pytorch.org/whl/cu128
+    if (Test-CudaWorks $venvPy) { Write-Ok "CUDA PyTorch installed" }
+    else { Write-Warn2 "PyTorch installed but a CUDA test op failed. Update your NVIDIA driver; the pipeline will fall back to CPU (slow) until then." }
 }
 
 # ---------------------------------------------------------------------------
