@@ -21,7 +21,13 @@
 #>
 param([switch]$Check)
 
-$ErrorActionPreference = "Stop"
+# NOTE: 'Continue', not 'Stop'. This script shells out to native tools (winget,
+# python, pip, ollama, ffmpeg) that legitimately write progress/info to stderr.
+# Under 'Stop', PowerShell 5.1 turns any native stderr line into a terminating
+# NativeCommandError and aborts the whole install -- even when the command
+# actually succeeded. We guard every critical step explicitly instead (Test-Path
+# on outputs, $LASTEXITCODE / $? checks), so 'Continue' is both safer and correct.
+$ErrorActionPreference = "Continue"
 Set-Location $PSScriptRoot
 
 # ---------------------------------------------------------------------------
@@ -111,6 +117,18 @@ function Test-OllamaModel($model) {
 }
 
 $venvPy = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
+
+# A stale PYTHONHOME / PYTHONPATH makes a freshly-located Python look for its
+# standard library in the wrong place. That is the classic cause of
+# "No module named 'subprocess'" when running `python -m venv`. Clear them for
+# THIS process only (does not touch the user's saved environment) so every
+# Python we spawn below uses its own bundled stdlib.
+foreach ($poison in 'PYTHONHOME', 'PYTHONPATH') {
+    if (Test-Path "Env:$poison") {
+        Write-Warn2 "Ignoring $poison for this run (a stale value breaks venv creation)"
+        Remove-Item "Env:$poison" -ErrorAction SilentlyContinue
+    }
+}
 
 # ===========================================================================
 # DRY RUN (-Check): report only, change nothing, then exit.
@@ -246,8 +264,31 @@ Write-Step "Creating Python virtual environment (.venv)"
 if (Test-Path $venvPy) {
     Write-Ok ".venv already exists"
 } else {
-    & $python -m venv .venv
-    if (-not (Test-Path $venvPy)) { Write-Err2 "Failed to create .venv"; exit 1 }
+    & $python -m venv .venv 2>$null
+    if (-not (Test-Path $venvPy)) {
+        # Most common cause is a broken/partial Python install or stale
+        # PYTHONHOME/PYTHONPATH (cleared above). Try a clean winget (re)install
+        # of Python and retry once before giving up.
+        Write-Warn2 "venv creation failed with $python - attempting a clean Python 3.12 (re)install..."
+        if ($haveWinget) {
+            winget install --id Python.Python.3.12 -e --accept-source-agreements --accept-package-agreements --silent
+            Update-SessionPath
+            $retryPy = Find-Python
+            if ($retryPy) {
+                & $retryPy -m venv .venv 2>$null
+                if (Test-Path $venvPy) { $python = $retryPy }
+            }
+        }
+    }
+    if (-not (Test-Path $venvPy)) {
+        Write-Err2 "Could not create the virtual environment (.venv)."
+        Write-Warn2 "This points to a broken Python install or a leftover PYTHONHOME / PYTHONPATH."
+        Write-Warn2 "Try one of these, then re-run install.bat:"
+        Write-Warn2 "  1. Reinstall Python 3.12 from https://www.python.org/downloads/ (tick 'Add python.exe to PATH')."
+        Write-Warn2 "  2. Remove any PYTHONHOME / PYTHONPATH entries from your System Environment Variables."
+        Write-Warn2 "  3. Open a brand-new terminal so the changes take effect."
+        exit 1
+    }
     Write-Ok ".venv created"
 }
 & $venvPy -m pip install --upgrade pip --quiet
@@ -300,12 +341,16 @@ $configPath = Join-Path $PSScriptRoot "config.json"
 if (Test-Path $configPath) {
     Write-Ok "config.json already exists - leaving your settings untouched"
 } else {
-    $cfg = Get-Content (Join-Path $PSScriptRoot "config.example.json") -Raw | ConvertFrom-Json
-    $cfg.whisper_model = $whisperModel
-    $cfg.whisper_device = $device
-    $cfg.ollama_model = $ollamaModel
-    ($cfg | ConvertTo-Json -Depth 10) | Out-File -FilePath $configPath -Encoding utf8
-    Write-Ok "Wrote tuned config.json"
+    try {
+        $cfg = Get-Content (Join-Path $PSScriptRoot "config.example.json") -Raw | ConvertFrom-Json
+        $cfg.whisper_model = $whisperModel
+        $cfg.whisper_device = $device
+        $cfg.ollama_model = $ollamaModel
+        ($cfg | ConvertTo-Json -Depth 10) | Out-File -FilePath $configPath -Encoding utf8
+        Write-Ok "Wrote tuned config.json"
+    } catch {
+        Write-Warn2 "Couldn't auto-write config.json ($_). Copy config.example.json to config.json manually if needed."
+    }
 }
 
 # ---------------------------------------------------------------------------

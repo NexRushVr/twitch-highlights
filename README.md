@@ -445,6 +445,7 @@ On macOS / Linux, the equivalent is a `cron` entry pointing at `python pipeline.
 
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
+| `install.bat` fails with `No module named 'subprocess'` / "Failed to create .venv" | A stale `PYTHONHOME` / `PYTHONPATH` is pointing Python at the wrong standard library | The latest installer clears these automatically and retries; if it persists, remove `PYTHONHOME`/`PYTHONPATH` from your System Environment Variables (or reinstall Python 3.12 from python.org), open a new terminal, and re-run. |
 | `RuntimeError: CUDA error` / `Torch not compiled with CUDA` | torch CPU wheel installed, or no GPU | Install CUDA torch (see GPU and Whisper setup), or set `whisper_device: "cpu"`. |
 | `whisper.load_model` OOM on GPU | `large-v3` needs ~10 GB VRAM | Use `whisper_model: "medium"` or `"small"`. |
 | `httpx.ConnectError` / `connection refused` to `localhost:11434` | Ollama daemon not running | Launch the Ollama tray app, or run `ollama serve`. |

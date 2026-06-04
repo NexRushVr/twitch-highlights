@@ -74,6 +74,9 @@ Full table is in `README.md` under "Config reference".
 - `ffmpeg -version` -> ffmpeg on PATH.
 - Tests (no GPU/network needed): `.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt; .\.venv\Scripts\python.exe -m pytest -q`.
 - The troubleshooting table in `README.md` maps common error messages to fixes.
+- `No module named 'subprocess'` / "Failed to create .venv": a stale
+  `PYTHONHOME`/`PYTHONPATH`. The installer clears these for its own process and
+  retries; if creating the venv by hand, run with those env vars unset.
 
 ## Guardrails
 - Don't delete the user's `downloads/`, `clips/`, or `config.json` without asking.

@@ -6,6 +6,17 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Installer no longer dies with `No module named 'subprocess'` when creating the
+  `.venv`. A stale `PYTHONHOME` / `PYTHONPATH` points a fresh Python at the wrong
+  standard library; the installer now clears both for its own process (your saved
+  environment is untouched), and if venv creation still fails it auto-(re)installs
+  Python 3.12 via winget and retries once, with clear manual remediation if not.
+- Installer no longer aborts when a native tool (ollama, winget, pip) writes to
+  stderr. Windows PowerShell 5.1 turned that into a fatal `NativeCommandError`
+  under `-ErrorAction Stop`; the script now runs with `Continue` and guards each
+  step explicitly, so benign stderr (e.g. Ollama's startup log) can't kill a run.
+
 ### Added
 - Automatic source cleanup: after a successful run, the downloaded VOD, any
   windowed trim, and the derived `.wav` are deleted to reclaim multi-GB of
