@@ -121,6 +121,40 @@ def _estimate_total_runtime(video_path: str, cfg: dict) -> float | None:
     return duration * factor
 
 
+def _export_avifs(extracted: list, cfg: dict, progress, manifest_path: str = None) -> None:
+    """Encode the run's clips to AVIF. Used in the normal flow AND on a cache-hit
+    re-run (so re-running with a different --avif-target still produces new files
+    instead of being swallowed by the skip-guard). Each variant has a distinct
+    suffix (-opt/-not or -<N>mb), so different sizes never collide. Attaches the
+    paths to `extracted` (merging, so multiple sizes accumulate) and rewrites the
+    manifest when `manifest_path` is given."""
+    from modules.avif_exporter import clips_from_manifest, export_clips_to_avif
+    with progress.phase("avif", "Exporting AVIFs (AvifTools)", spinner=False):
+        avif_source = cfg.get("avif_source", "captioned")
+        clip_files = clips_from_manifest(extracted, avif_source)
+        avif_dir = os.path.join(
+            cfg["output_dir"], "avif" if avif_source == "captioned" else "avif-clean")
+
+        def _avif_prog(done, total, label):
+            progress.sub("Exporting AVIFs",
+                         fraction=(done / total if total else None), detail=label)
+
+        avif_results = export_clips_to_avif(clip_files, avif_dir, cfg, on_progress=_avif_prog)
+        by_name = {r["name"]: r for r in avif_results}
+        for item in extracted:
+            base = os.path.splitext(
+                os.path.basename(item.get("captioned") or item.get("file") or ""))[0]
+            if base.endswith("_captioned"):
+                base = base[: -len("_captioned")]
+            if base in by_name:
+                item.setdefault("avif", {}).update(by_name[base]["files"])
+        made = sum(len(r.get("files") or {}) for r in avif_results)
+        print(f"    Exported {made} AVIFs -> {avif_dir}")
+    if manifest_path:
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(extracted, f, indent=2)
+
+
 def run(cfg: dict = None) -> list:
     if cfg is None:
         cfg = load_config()
@@ -206,13 +240,25 @@ def run(cfg: dict = None) -> list:
                 video_path, start_str, end_str, cfg["download_dir"], quiet=quiet
             )
 
-    # Now that the source (post-window) is on disk, we can estimate the total
-    # wall-clock runtime so the overall-% display reflects elapsed-vs-expected
-    # rather than just "fraction of phase weights done."
-    estimate = _estimate_total_runtime(video_path, cfg)
-    if estimate is not None:
-        progress.set_estimated_total(estimate)
-        print(f"    Expected total runtime: ~{fmt_seconds(estimate)} (based on source duration)")
+    # Now that the source (post-window) is on disk we know its duration, so we
+    # can anchor a real wall-clock estimate. The download time is already in
+    # `total_elapsed()`, so the model adds it to the remaining-phases estimate
+    # (and re-anchors at every phase boundary). See modules/timing.py.
+    run_duration = None
+    try:
+        run_duration = _probe_duration(video_path)
+    except Exception:
+        run_duration = None
+    if run_duration:
+        override = float(cfg.get("runtime_estimate_factor") or 0.0)
+        if override > 0:
+            # Legacy escape hatch: a fixed factor, but still anchored on elapsed.
+            progress.set_estimated_total(progress.total_elapsed() + run_duration * override)
+        else:
+            from modules.timing import build_phase_plan, factors_for
+            progress.set_time_model(run_duration, build_phase_plan(cfg, factors_for(cfg)))
+        print(f"    Expected total runtime: ~{fmt_seconds(progress.estimated_total())} "
+              f"(refines as it runs)")
 
     # Output dir: <base>/<streamer>/<vod_date>[_w<start>-<end>]/
     # When a window is applied we suffix the subdir with the same `_w<s>-<e>`
@@ -236,7 +282,16 @@ def run(cfg: dict = None) -> list:
             with open(manifest_path, encoding="utf-8") as f:
                 existing = json.load(f)
             if isinstance(existing, list) and existing:
-                print(f"\n[skip] {manifest_path} already has {len(existing)} clips. Use --force to regenerate.")
+                if cfg.get("avif_export"):
+                    # Clips are cached, but the user asked for AVIFs (likely a
+                    # different --avif-target) — make those from the existing
+                    # clips instead of no-op'ing. Distinct suffixes mean new
+                    # sizes never overwrite old ones.
+                    print(f"\n[skip] {manifest_path} already has {len(existing)} clips — "
+                          f"exporting the requested AVIFs from them (use --force to redo clips).")
+                    _export_avifs(existing, cfg, progress, manifest_path)
+                else:
+                    print(f"\n[skip] {manifest_path} already has {len(existing)} clips. Use --force to regenerate.")
                 return existing
         except (OSError, json.JSONDecodeError):
             pass
@@ -343,28 +398,7 @@ def run(cfg: dict = None) -> list:
     # AVIFs via the AvifTools module (auto-installed on first use). Each clip ->
     # <streamer>-<rand>-not.avif (high-q 480p60) + <streamer>-<rand>-opt.avif.
     if cfg.get("avif_export"):
-        from modules.avif_exporter import clips_from_manifest, export_clips_to_avif
-        with progress.phase("avif", "Exporting AVIFs (AvifTools)", spinner=False):
-            avif_source = cfg.get("avif_source", "captioned")
-            clip_files = clips_from_manifest(extracted, avif_source)
-            avif_dir = os.path.join(
-                cfg["output_dir"], "avif" if avif_source == "captioned" else "avif-clean")
-
-            def _avif_prog(done, total, label):
-                progress.sub("Exporting AVIFs",
-                             fraction=(done / total if total else None), detail=label)
-
-            avif_results = export_clips_to_avif(clip_files, avif_dir, cfg, on_progress=_avif_prog)
-            by_name = {r["name"]: r for r in avif_results}
-            for item in extracted:
-                base = os.path.splitext(
-                    os.path.basename(item.get("captioned") or item.get("file") or ""))[0]
-                if base.endswith("_captioned"):
-                    base = base[: -len("_captioned")]
-                if base in by_name:
-                    item["avif"] = by_name[base]["files"]
-            made = sum(1 for r in avif_results for k in ("opt", "not") if r.get(k))
-            print(f"    Exported {made} AVIFs -> {avif_dir}")
+        _export_avifs(extracted, cfg, progress)
 
     # Save manifest
     os.makedirs(cfg["output_dir"], exist_ok=True)
@@ -386,6 +420,14 @@ def run(cfg: dict = None) -> list:
         if freed_mb > 0:
             print(f"   Cleaned up source files: freed {freed_mb:.1f} MB "
                   f"(pass --keep-vod to retain)")
+
+    # Learn this run's per-phase factors so the next estimate is tighter.
+    if run_duration:
+        try:
+            from modules.timing import record_run
+            record_run(cfg, run_duration, progress.phase_times)
+        except Exception:
+            pass
 
     clips_dir_mb = _dir_size_mb(cfg["output_dir"])
     print(f"\nDone. {len(extracted)} clips ({clips_dir_mb:.1f} MB) -> {cfg['output_dir']}")

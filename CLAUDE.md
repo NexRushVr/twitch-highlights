@@ -83,8 +83,11 @@ Full table is in `README.md` under "Config reference".
   pick a size in the GUI's AVIF-target dropdown). Produces one
   `<streamer>-<rand>-<N>mb.avif` aimed under that size (AvifTools `-TargetSizeMB`).
 
-Note: clip files are named `<streamer>-<random>.mp4` (e.g. `abehamm-a3f9c1.mp4`),
-not `clip_NNN_<reason>.mp4`. The reason/score are in the manifest + mp4 metadata.
+Note: clip files are named `<streamer>-<adjective>-<noun>.mp4` (Docker-style, e.g.
+`abehamm-sneaky-otter.mp4`), not `clip_NNN_<reason>.mp4`. The reason/score are in
+the manifest + mp4 metadata. The ETA self-calibrates from past runs
+(`logs/timing_calibration.json`); `runtime_estimate_factor` is a fixed-factor
+override if you want one.
 
 ## Verify / troubleshoot
 - `.\.venv\Scripts\python.exe -c "import torch;print(torch.cuda.is_available())"` -> must be `True` for GPU.

@@ -121,6 +121,15 @@ class Progress:
         self._t0 = time.monotonic()
         self._estimated_total: float | None = None
         self._cur_key: str | None = None
+        # Phase-factor time model (see modules/timing.py). When a plan is set,
+        # the total estimate is re-anchored on the ACTUAL elapsed time at each
+        # phase boundary: estimated_total = elapsed_now + sum(factor*duration for
+        # phases not yet done). This counts the download (it's in `elapsed` once
+        # finished) and self-corrects drift, instead of a fixed duration*0.15.
+        self._time_plan: list | None = None   # [(phase_key, factor)]
+        self._duration: float | None = None   # source duration in seconds
+        self._completed: set = set()           # phase keys that have finished
+        self.phase_times: dict = {}            # phase_key -> measured seconds
         # Opt-in machine-readable progress feed for GUI front-ends. When the
         # env var `VOD_CLIP_PROGRESS_JSON` points at a file we *also* append one
         # JSON line per phase event; the human-readable stdout is byte-for-byte
@@ -235,6 +244,34 @@ class Progress:
             "elapsed": time.monotonic() - self._t0,
         })
 
+    def estimated_total(self) -> float | None:
+        return self._estimated_total
+
+    def set_time_model(self, duration: float, plan: list) -> None:
+        """Install a phase-factor model and compute the first anchored estimate.
+
+        `plan` is an ordered list of (phase_key, factor) for the phases that will
+        run; factor is wall-clock seconds per second of `duration`. Called once
+        the source duration is known (after the download), so the download time
+        is already part of `total_elapsed()`.
+        """
+        self._duration = max(0.0, float(duration))
+        self._time_plan = list(plan)
+        self._recompute_estimate()
+
+    def _recompute_estimate(self) -> None:
+        """Re-anchor: estimated_total = elapsed_now + remaining phases' estimate."""
+        if not self._time_plan or not self._duration:
+            return
+        remaining = sum(f for (k, f) in self._time_plan if k not in self._completed)
+        est = self.total_elapsed() + remaining * self._duration
+        self._estimated_total = max(1.0, est)
+        self._emit({
+            "type": "set_total",
+            "estimated_total": self._estimated_total,
+            "elapsed": self.total_elapsed(),
+        })
+
     def _overall_pct(self, *, finished: bool = False) -> int:
         elapsed = time.monotonic() - self._t0
         if self._estimated_total is not None:
@@ -305,6 +342,10 @@ class Progress:
             self._completed_weight = min(
                 1.0, self._completed_weight + self.weights.get(key, 0.0)
             )
+            self.phase_times[key] = elapsed
+            self._completed.add(key)
+            if self._time_plan:
+                self._recompute_estimate()   # re-anchor on real elapsed
             overall_after = self._overall_pct()
             eta_after = self._eta_suffix()
             print(

@@ -6,6 +6,32 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **Runtime estimate / ETA is far more accurate and self-calibrating.** The old
+  `duration × 0.15` (set after the download) routinely hit "0 left" with the job
+  still running — it ignored the multi-minute download and under-weighted the LLM
+  (the real bottleneck). Now each phase is modelled as `duration × factor`, the
+  total is **re-anchored on actual elapsed time at every phase boundary** (so the
+  download counts and drift self-corrects), and the factors are **learned from
+  your own runs** (EMA, keyed by whisper/LLM model + device, in
+  `logs/timing_calibration.json`). Replayed on real runs the estimate went from
+  0.26–0.60× of actual to 0.96–1.11×, tightening further as it learns.
+  `runtime_estimate_factor` still works as a fixed-factor override (now also
+  anchored on elapsed). See `modules/timing.py`.
+- **Clip filenames are now fun Docker-style slugs** — `<streamer>-<adjective>-<noun>.mp4`
+  (e.g. `abehamm-sneaky-otter.mp4`) instead of a hex token. Reason/score still in
+  the manifest + mp4 metadata; the slug carries through to captioned + AVIF names.
+- GUI: during the source download the monitor shows the live size/speed where the
+  static **"0%"** used to sit, so it's visibly working instead of looking stuck.
+
+### Fixed
+- Re-running the pipeline to make AVIFs at a **different `--avif-target` size** on
+  an already-clipped VOD no longer no-ops — the skip-guard now exports the
+  requested AVIFs from the cached clips (each size has a distinct suffix, so they
+  never overwrite each other). The on-demand Results buttons already worked.
+- The "Exported N AVIFs" count was 0 in target-size mode (it only counted the
+  quality `opt`/`not` variants); it now counts all produced files.
+
 ## [1.3.0] - 2026-06-04
 
 ### Added

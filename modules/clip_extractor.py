@@ -1,6 +1,7 @@
 import os
-import secrets
 import subprocess
+
+from modules.naming import unique_slug
 
 
 ATTRIBUTION_COMMENT = (
@@ -71,10 +72,11 @@ def batch_extract(video_path: str, clips: list, config: dict, progress=None,
     output_files = []
     quiet = not bool(config.get("verbose", False))
 
-    # Clips are named "<streamer>-<random>.mp4" (the reason/score live in the
-    # manifest meta + embedded mp4 metadata, so no info is lost). The random
-    # token gives each highlight a short, shareable identity that its captioned
-    # variant and AVIF exports reuse.
+    # Clips are named "<streamer>-<adjective>-<noun>.mp4" (Docker-style), e.g.
+    # "abehamm-sneaky-otter.mp4". The reason/score live in the manifest meta +
+    # embedded mp4 metadata, so no info is lost — the fun slug just gives each
+    # highlight a memorable, shareable identity that its captioned variant and
+    # AVIF exports reuse.
     prefix = clip_name_prefix(config, streamer)
     used = set()
 
@@ -84,11 +86,8 @@ def batch_extract(video_path: str, clips: list, config: dict, progress=None,
 
     for i, clip in iterable:
         reason = clip.get("reason", "clip")
-        token = secrets.token_hex(3)
-        while token in used:
-            token = secrets.token_hex(3)
-        used.add(token)
-        fname = f"{prefix}-{token}.mp4"
+        slug = unique_slug(used)
+        fname = f"{prefix}-{slug}.mp4"
         out = os.path.join(config["output_dir"], fname)
         extract_clip(
             video_path,

@@ -95,9 +95,9 @@ def test_batch_extract_returns_file_and_meta(tmp_path, sample_clips, base_config
         assert "meta" in item
 
 
-def test_batch_extract_filenames_use_streamer_random(tmp_path, sample_clips, base_config):
-    """Clips are named <prefix>-<6-hex>.mp4 (prefix = 'highlight' for twitch).
-    The reason lives in meta + embedded metadata, not the filename."""
+def test_batch_extract_filenames_use_streamer_slug(tmp_path, sample_clips, base_config):
+    """Clips are named <prefix>-<adjective>-<noun>.mp4 (prefix = 'highlight' for
+    twitch). The reason lives in meta + embedded metadata, not the filename."""
     import re
     base_config["output_dir"] = str(tmp_path / "clips")
     with patch("modules.clip_extractor.subprocess.run") as mock_run:
@@ -106,7 +106,7 @@ def test_batch_extract_filenames_use_streamer_random(tmp_path, sample_clips, bas
 
     for item in result:
         name = os.path.basename(item["file"])
-        assert re.fullmatch(r"highlight-[0-9a-f]{6}\.mp4", name), name
+        assert re.fullmatch(r"highlight-[a-z]+-[a-z]+\.mp4", name), name
         # reason is preserved in meta, just not in the filename
         assert "reason" in item["meta"]
 
@@ -122,7 +122,7 @@ def test_batch_extract_prefix_uses_channel_for_kick_vodvod(tmp_path, sample_clip
 
     for item in result:
         # leading "@" stripped; prefix is the channel slug
-        assert re.fullmatch(r"abehamm-[0-9a-f]{6}\.mp4", os.path.basename(item["file"]))
+        assert re.fullmatch(r"abehamm-[a-z]+-[a-z]+\.mp4", os.path.basename(item["file"]))
 
 
 def test_batch_extract_filenames_are_unique(tmp_path, sample_clips, base_config):

@@ -166,8 +166,8 @@ function enterRunningUI(command) {
   $('monitor').classList.remove('hidden');
   $('runResult').classList.add('hidden');
   $('phaseLabel').textContent = 'Resolving source…';
-  $('etaLine').textContent = '';
-  $('overallPct').textContent = '0%';
+  $('etaLine').textContent = 'Locating the VOD…';
+  $('overallPct').textContent = '';   // no misleading "0%" until we can estimate
   const fill = $('overallFill');
   fill.style.width = '0%';
   fill.classList.add('indeterminate');
@@ -240,11 +240,14 @@ window.onProgress = function (ev) {
       }
       break;
     case 'sub_progress':
-      // Live sub-status (e.g. "Found VOD — 234 MB · 15.2 MB/s") during the
-      // pre-estimate source phase. The ETA line is free then; once an estimate
-      // arrives, tick() reclaims it for the countdown.
+      // Live sub-status (e.g. "Downloading 234 MB · 15.2 MB/s") during the
+      // pre-estimate source phase. Show the download size where the "0%" used
+      // to sit, so it's visibly working — not stuck. Once an estimate arrives,
+      // tick() reclaims the % and ETA.
       if (run.estimatedTotal == null && ev.message) {
+        $('phaseLabel').textContent = ev.message + '…';
         $('etaLine').textContent = ev.detail ? `${ev.message} — ${ev.detail}` : ev.message;
+        if (ev.detail) $('overallPct').textContent = ev.detail.split('·')[0].trim();  // "234 MB"
       }
       break;
     case 'avif_progress':

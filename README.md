@@ -366,10 +366,10 @@ Add `--avif` to also encode each clip into two small, looping **animated AVIFs**
 python pipeline.py --source-type kick --channel abehamm --clip-mode all --avif
 ```
 
-Each highlight `abehamm-a3f9c1.mp4` yields, in `clips/<streamer>/<date>/avif/`:
+Each highlight `abehamm-sneaky-otter.mp4` yields, in `clips/<streamer>/<date>/avif/`:
 
-- **`abehamm-a3f9c1-not.avif`** — high quality (480p, 60fps, low CRF — "not optimized")
-- **`abehamm-a3f9c1-opt.avif`** — optimized (480p, 30fps — typically ~2–3× smaller, drops straight into chat)
+- **`abehamm-sneaky-otter-not.avif`** — high quality (480p, 60fps, low CRF — "not optimized")
+- **`abehamm-sneaky-otter-opt.avif`** — optimized (480p, 30fps — typically ~2–3× smaller, drops straight into chat)
 
 By default it encodes the captioned clip; `--avif-source raw` uses the clean cut instead. Tuning lives in `config.json` (`avif_max_width`, `avif_hq_crf`/`avif_hq_fps`, `avif_opt_crf`/`avif_opt_fps`, `avif_preset`). In the **desktop GUI**, tick *"Also export Discord AVIFs"* on the run form, or use the Results-tab *"From captioned / From clean cuts"* buttons after a run.
 
@@ -379,7 +379,7 @@ By default it encodes the captioned clip; `--avif-source raw` uses the clean cut
 python pipeline.py --source-type kick --channel abehamm --avif --avif-target 10
 ```
 
-This produces one **`abehamm-a3f9c1-10mb.avif`** per clip, auto-choosing the bitrate (and downscaling toward 480p / 24fps only if the budget is too tight) to keep it as crisp as possible under 10 MB. Floors are `avif_min_width` / `avif_min_fps`, and `avif_levers` (default `Quality,Resolution,Fps`) controls which knobs it may turn. In the GUI, pick a size (8 / 10 / 25 / 50 MB or custom) from the AVIF-target dropdown on the run form or in Results. (Powered by AvifTools' `-TargetSizeMB`.)
+This produces one **`abehamm-sneaky-otter-10mb.avif`** per clip, auto-choosing the bitrate (and downscaling toward 480p / 24fps only if the budget is too tight) to keep it as crisp as possible under 10 MB. Floors are `avif_min_width` / `avif_min_fps`, and `avif_levers` (default `Quality,Resolution,Fps`) controls which knobs it may turn. In the GUI, pick a size (8 / 10 / 25 / 50 MB or custom) from the AVIF-target dropdown on the run form or in Results. (Powered by AvifTools' `-TargetSizeMB`.)
 
 The encoding is done by the **[AvifTools](https://github.com/NexRushVr/optimized-discord-gifs-avif)** module (SVT-AV1 via ffmpeg, CPU — no GPU needed), which is auto-installed/imported on first use. Requires an ffmpeg built with `libsvtav1` (`ffmpeg -encoders | grep svtav1`).
 
