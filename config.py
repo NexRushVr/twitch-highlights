@@ -86,8 +86,18 @@ def load_config(path: str = None) -> dict:
     cfg = DEFAULT_CONFIG.copy()
 
     if path and Path(path).exists():
-        with open(path) as f:
-            overrides = json.load(f)
+        # utf-8-sig: the installer writes config.json via PowerShell, which adds a
+        # UTF-8 BOM; a hand-edit in Notepad can too. utf-8-sig strips a leading BOM
+        # if present and is a no-op on plain UTF-8, so json.load never sees the BOM
+        # bytes (a bare open() defaults to cp1252 on Windows and crashes on them).
+        try:
+            with open(path, encoding="utf-8-sig") as f:
+                overrides = json.load(f)
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            raise ValueError(
+                f"Config file {path} is not valid JSON ({e}). Fix it, or delete it "
+                f"and re-run the installer to regenerate a fresh config.json."
+            ) from e
         cfg.update(overrides)
 
     # VOD_CLIP_<KEY> env var overrides

@@ -53,6 +53,22 @@ def test_load_config_missing_file_uses_defaults(tmp_path):
     assert cfg == DEFAULT_CONFIG
 
 
+def test_load_config_handles_utf8_bom(tmp_path):
+    # The Windows installer writes config.json via PowerShell, which prepends a
+    # UTF-8 BOM. Regression guard: load_config must read it, not choke on the BOM.
+    config_file = tmp_path / "config.json"
+    config_file.write_text(json.dumps({"max_clips": 7}), encoding="utf-8-sig")
+    cfg = load_config(str(config_file))
+    assert cfg["max_clips"] == 7
+
+
+def test_load_config_raises_clear_error_on_bad_json(tmp_path):
+    config_file = tmp_path / "config.json"
+    config_file.write_text("{not valid json")
+    with pytest.raises(ValueError, match="not valid JSON"):
+        load_config(str(config_file))
+
+
 def test_load_config_env_var_string_override(monkeypatch):
     monkeypatch.setenv("VOD_CLIP_OLLAMA_MODEL", "llama3")
     cfg = load_config()

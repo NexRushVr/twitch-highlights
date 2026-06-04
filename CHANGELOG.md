@@ -7,6 +7,19 @@ versioning follows [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- First run after a Windows install crashed with
+  `JSONDecodeError: Expecting value: line 1 column 1 (char 0)` reading
+  `config.json`. The installer wrote it via PowerShell 5.1 `Out-File -Encoding
+  utf8`, which prepends a UTF-8 BOM, and `config.py` read it with a bare
+  `open()` (cp1252 on Windows) that chokes on the BOM. Fixed on both sides:
+  the installer now writes BOM-less UTF-8, and `load_config` reads with
+  `utf-8-sig` (so existing BOM/hand-edited configs also load) and raises a
+  clear message on malformed JSON instead of a traceback.
+- Twitch downloads could crash on non-ASCII metadata. `source_resolver` read
+  yt-dlp's `.info.json` (UTF-8, `ensure_ascii=False`) with a bare `open()`, so
+  any emoji/accented/CJK/Cyrillic title or streamer name raised a
+  `UnicodeDecodeError` on Windows. Now read as `utf-8-sig`. Manifest/transcript
+  reads and the manifest write are pinned to UTF-8 for consistency.
 - Installer no longer dies with `No module named 'subprocess'` when creating the
   `.venv`. A stale `PYTHONHOME` / `PYTHONPATH` points a fresh Python at the wrong
   standard library; the installer now clears both for its own process (your saved

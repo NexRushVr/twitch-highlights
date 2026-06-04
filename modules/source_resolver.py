@@ -50,7 +50,11 @@ def download_twitch_vod(url: str, quality: str, out_dir: str, quiet: bool = Fals
     if not info_files:
         raise FileNotFoundError(f"No .info.json found in {out_dir} after download")
 
-    with open(info_files[0]) as f:
+    # yt-dlp writes the .info.json as UTF-8 with ensure_ascii=False, so it can
+    # contain raw non-ASCII (emoji titles, accented/CJK/Cyrillic names) and may
+    # carry a BOM. A bare open() defaults to cp1252 on Windows and crashes on
+    # those bytes; utf-8-sig decodes correctly and strips any leading BOM.
+    with open(info_files[0], encoding="utf-8-sig") as f:
         info = json.load(f)
 
     # Date: prefer upload_date (YYYYMMDD) from yt-dlp; fall back to today

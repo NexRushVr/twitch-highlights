@@ -222,7 +222,7 @@ def run(cfg: dict = None) -> list:
     manifest_path = os.path.join(cfg["output_dir"], "clips_manifest.json")
     if not cfg.get("force") and os.path.exists(manifest_path):
         try:
-            with open(manifest_path) as f:
+            with open(manifest_path, encoding="utf-8") as f:
                 existing = json.load(f)
             if isinstance(existing, list) and existing:
                 print(f"\n[skip] {manifest_path} already has {len(existing)} clips. Use --force to regenerate.")
@@ -252,7 +252,7 @@ def run(cfg: dict = None) -> list:
     # spinner=False: Whisper prints its own per-segment progress bar.
     with progress.phase("transcribe", "Transcribing with Whisper", spinner=False):
         if os.path.exists(transcript_path) and os.path.getsize(transcript_path) > 0:
-            with open(transcript_path) as f:
+            with open(transcript_path, encoding="utf-8") as f:
                 segments = json.load(f)
             print(f"    Using cached transcript: {len(segments)} segments")
         else:
@@ -331,7 +331,7 @@ def run(cfg: dict = None) -> list:
     # Save manifest
     os.makedirs(cfg["output_dir"], exist_ok=True)
     manifest_path = os.path.join(cfg["output_dir"], "clips_manifest.json")
-    with open(manifest_path, "w") as f:
+    with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(extracted, f, indent=2)
 
     # Step 8: Reclaim disk — delete the multi-GB VOD + WAV now that clips are

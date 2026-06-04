@@ -346,7 +346,10 @@ if (Test-Path $configPath) {
         $cfg.whisper_model = $whisperModel
         $cfg.whisper_device = $device
         $cfg.ollama_model = $ollamaModel
-        ($cfg | ConvertTo-Json -Depth 10) | Out-File -FilePath $configPath -Encoding utf8
+        # Write UTF-8 WITHOUT a BOM. PowerShell 5.1's `Out-File -Encoding utf8`
+        # prepends a BOM (EF BB BF), which Python's json.load chokes on. The
+        # UTF8Encoding($false) ctor arg disables the BOM.
+        [System.IO.File]::WriteAllText($configPath, ($cfg | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
         Write-Ok "Wrote tuned config.json"
     } catch {
         Write-Warn2 "Couldn't auto-write config.json ($_). Copy config.example.json to config.json manually if needed."
