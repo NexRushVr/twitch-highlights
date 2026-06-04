@@ -53,9 +53,9 @@
           <p class="hint">Best for your own streams or still-live VODs.</p>
         </div>
         <div class="source-input hidden" data-for="vodvod">
-          <label class="field-label" for="vodvodChannel">vodvod.top handle</label>
-          <input id="vodvodChannel" type="text" placeholder="e.g. @eevi" />
-          <p class="hint">Twitch mirror — for expired Twitch VODs.</p>
+          <label class="field-label" for="vodvodChannel">vodvod.top channel name</label>
+          <input id="vodvodChannel" type="text" placeholder="e.g. eevi" />
+          <p class="hint">Twitch mirror — for expired Twitch VODs. (Type the name with or without the “@”.)</p>
         </div>
         <div class="source-input hidden" data-for="local">
           <label class="field-label" for="localPath">Video file on this PC</label>
@@ -214,7 +214,7 @@
         <p class="hint">Writes <code>nightly.ps1</code> and (optionally) registers a daily Task Scheduler job.</p>
         <div class="grid2">
           <div><label class="field-label sm">vodvod channels (one per line)</label>
-            <textarea id="nl-vodvod" rows="3" placeholder="@eevi&#10;@shroud"></textarea></div>
+            <textarea id="nl-vodvod" rows="3" placeholder="eevi&#10;shroud"></textarea></div>
           <div><label class="field-label sm">Kick channels (one per line)</label>
             <textarea id="nl-kick" rows="3" placeholder="abehamm"></textarea></div>
           <div><label class="field-label sm">Run at (HH:MM, 24h)</label>

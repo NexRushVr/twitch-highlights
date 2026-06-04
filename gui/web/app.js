@@ -196,15 +196,26 @@ window.onProgress = function (ev) {
       break;
     case 'phase_start':
       markPhase(ev.index, ev.label);
-      if (run.estimatedTotal == null && typeof ev.overall === 'number') {
-        $('overallFill').classList.remove('indeterminate');
-        setBar(Math.max(run.lastOverall, ev.overall));
-      }
+      // Keep the bar indeterminate (animated) until a wall-clock estimate
+      // arrives, so the long source download visibly works instead of sitting
+      // at a frozen 0%.
       break;
     case 'phase_end':
       if (typeof ev.overall === 'number') run.lastOverall = Math.max(run.lastOverall, ev.overall);
       finishPhase(ev.index, ev.phase_elapsed);
-      if (run.estimatedTotal == null) setBar(run.lastOverall);
+      if (run.estimatedTotal == null) {
+        // No estimate (duration probe failed) — advance discretely by phase.
+        $('overallFill').classList.remove('indeterminate');
+        setBar(run.lastOverall);
+      }
+      break;
+    case 'sub_progress':
+      // Live sub-status (e.g. "Found VOD — 234 MB · 15.2 MB/s") during the
+      // pre-estimate source phase. The ETA line is free then; once an estimate
+      // arrives, tick() reclaims it for the countdown.
+      if (run.estimatedTotal == null && ev.message) {
+        $('etaLine').textContent = ev.detail ? `${ev.message} — ${ev.detail}` : ev.message;
+      }
       break;
     case 'run_end':
       endRun(ev);

@@ -57,8 +57,12 @@ def build_args(opts: dict) -> tuple[list[str], str | None]:
     if source in ("kick", "vodvod"):
         channel = (opts.get("channel") or "").strip()
         if not channel:
-            label = "Kick channel" if source == "kick" else "vodvod.top handle (e.g. @eevi)"
-            return [], f"Enter a {label}."
+            label = "Kick channel" if source == "kick" else "vodvod.top channel"
+            return [], f"Enter a {label} name."
+        # Don't make the user think about the leading "@". Both resolvers already
+        # canonicalize (vodvod adds "@", kick strips it), so we send a bare name
+        # and let each site decide — typing "eevi" or "@eevi" both work.
+        channel = channel.lstrip("@")
         args += ["--channel", channel]
     elif source == "twitch":
         url = (opts.get("url") or "").strip()

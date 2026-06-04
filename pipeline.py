@@ -151,7 +151,9 @@ def run(cfg: dict = None) -> list:
             if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
                 print(f"    Using cached video: {video_path}")
             else:
-                stream_m3u8_to_file(m3u8_url, video_path, quiet=quiet)
+                progress.sub(f"Found VOD {vod_date} — downloading")
+                with progress.download_monitor(video_path):
+                    stream_m3u8_to_file(m3u8_url, video_path, quiet=quiet)
         elif source == "kick":
             m3u8_url, vod_date = get_latest_kick_vod_m3u8(cfg["kick_channel"])
             if verbose:
@@ -160,16 +162,22 @@ def run(cfg: dict = None) -> list:
             if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
                 print(f"    Using cached video: {video_path}")
             else:
-                stream_m3u8_to_file(m3u8_url, video_path, quiet=quiet)
+                progress.sub(f"Found VOD {vod_date} — downloading")
+                with progress.download_monitor(video_path):
+                    stream_m3u8_to_file(m3u8_url, video_path, quiet=quiet)
         elif source == "twitch":
-            video_path, vod_date = download_twitch_vod(
-                cfg["twitch_vod_url"], cfg["quality"], cfg["download_dir"], quiet=quiet
-            )
+            progress.sub("Found Twitch VOD — downloading")
+            with progress.download_monitor(cfg["download_dir"]):
+                video_path, vod_date = download_twitch_vod(
+                    cfg["twitch_vod_url"], cfg["quality"], cfg["download_dir"], quiet=quiet
+                )
         elif source == "m3u8":
             vod_date = _today_iso()
             video_path = os.path.join(cfg["download_dir"], f"{vod_date}.mp4")
             if not (os.path.exists(video_path) and os.path.getsize(video_path) > 0):
-                stream_m3u8_to_file(cfg["m3u8_url"], video_path, quiet=quiet)
+                progress.sub("Downloading stream")
+                with progress.download_monitor(video_path):
+                    stream_m3u8_to_file(cfg["m3u8_url"], video_path, quiet=quiet)
         elif source == "local":
             if not cfg.get("local_path"):
                 raise ValueError("source_type='local' requires --path or local_path in config")

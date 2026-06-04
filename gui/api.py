@@ -325,8 +325,14 @@ class JsApi:
         register a daily Task Scheduler job. Confirm-before-register lives in the
         UI; `register=False` only writes the script."""
         cfg = cfg or {}
-        vodvod = [c.strip() for c in (cfg.get("vodvod_channels") or []) if c.strip()]
-        kick = [c.strip() for c in (cfg.get("kick_channels") or []) if c.strip()]
+        # Strip a leading "@" — the resolvers canonicalize per site, so users
+        # never have to remember which platform wants it.
+        def _chans(key):
+            return [n for n in
+                    ((c or "").strip().lstrip("@") for c in (cfg.get(key) or []))
+                    if n]
+        vodvod = _chans("vodvod_channels")
+        kick = _chans("kick_channels")
         if not vodvod and not kick:
             return {"status": "error", "message": "Add at least one channel."}
 

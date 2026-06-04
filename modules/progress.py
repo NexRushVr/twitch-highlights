@@ -120,6 +120,7 @@ class Progress:
         self._completed_weight = 0.0
         self._t0 = time.monotonic()
         self._estimated_total: float | None = None
+        self._cur_key: str | None = None
         # Opt-in machine-readable progress feed for GUI front-ends. When the
         # env var `VOD_CLIP_PROGRESS_JSON` points at a file we *also* append one
         # JSON line per phase event; the human-readable stdout is byte-for-byte
@@ -157,6 +158,68 @@ class Progress:
         if self._estimated_total is None:
             return None
         return max(0.0, self._estimated_total - (time.monotonic() - self._t0))
+
+    def sub(self, message: str, fraction: float | None = None,
+            detail: str | None = None) -> None:
+        """Emit a fine-grained sub-step inside the current phase — e.g. "Found
+        VOD" or live download progress. Goes to the JSON feed only (no stdout),
+        so the compact CLI display is untouched. No-op without a feed attached.
+        """
+        if self._sink is None:
+            return
+        self._emit({
+            "type": "sub_progress",
+            "phase_key": self._cur_key,
+            "message": message,
+            "fraction": fraction,
+            "detail": detail,
+            "elapsed": time.monotonic() - self._t0,
+        })
+
+    @contextmanager
+    def download_monitor(self, path: str, label: str = "Downloading"):
+        """While active, poll a growing output file (or directory) once a second
+        and emit sub-progress with downloaded size + speed, so a GUI can show a
+        live "Downloading 234 MB · 15.2 MB/s" during the otherwise-opaque source
+        download. No feed attached -> no thread, no-op.
+        """
+        if self._sink is None:
+            yield
+            return
+
+        def _size(p: str) -> int:
+            try:
+                if os.path.isdir(p):
+                    return sum(
+                        os.path.getsize(os.path.join(p, f))
+                        for f in os.listdir(p)
+                        if os.path.isfile(os.path.join(p, f))
+                    )
+                return os.path.getsize(p)
+            except OSError:
+                return 0
+
+        stop = threading.Event()
+
+        def _watch() -> None:
+            last_size = 0
+            last_t = time.monotonic()
+            while not stop.wait(1.0):
+                size = _size(path)
+                now = time.monotonic()
+                dt = now - last_t
+                speed = (size - last_size) / dt if dt > 0 else 0.0
+                last_size, last_t = size, now
+                detail = f"{size / 1e6:.0f} MB · {max(0.0, speed) / 1e6:.1f} MB/s"
+                self.sub(label, detail=detail)
+
+        watcher = threading.Thread(target=_watch, daemon=True)
+        watcher.start()
+        try:
+            yield
+        finally:
+            stop.set()
+            watcher.join(timeout=2.0)
 
     def set_estimated_total(self, seconds: float) -> None:
         """Tell the display the expected wall-clock duration of the whole run.
@@ -209,6 +272,7 @@ class Progress:
         Whisper's built-in progress bar) so the two don't fight for the line.
         """
         self._step_count += 1
+        self._cur_key = key
         start = time.monotonic()
         overall_before = self._overall_pct()
         eta = self._eta_suffix()

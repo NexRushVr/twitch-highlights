@@ -6,6 +6,19 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- GUI: live source-download feedback. During "Resolving source" the app now shows
+  "Found VOD …" then a live "Downloading &lt;MB&gt; · &lt;MB/s&gt;" line and keeps the
+  progress bar animating, instead of sitting at a frozen 0% during a multi-GB
+  download. Backed by new opt-in `sub_progress` events + a `download_monitor` in
+  `modules/progress.py`; with no GUI attached, CLI output is byte-for-byte unchanged.
+
+### Changed
+- GUI: channel inputs no longer care about a leading "@". Type `eevi` or `@eevi`
+  (or a Kick slug like `abehamm`) — the GUI normalizes per site (vodvod adds the
+  `@`, Kick strips it), matching what each resolver already accepts. Hints and the
+  nightly-scheduling placeholders updated to stop implying the `@` is required.
+
 ## [1.1.1] - 2026-06-04
 
 ### Fixed
