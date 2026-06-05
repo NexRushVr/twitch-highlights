@@ -76,8 +76,13 @@ def download_twitch_vod(url: str, quality: str, out_dir: str, quiet: bool = Fals
 _ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 
 
-def get_latest_vodvod_m3u8(channel_handle: str) -> tuple[str, str]:
-    """Scrape vodvod.top for the latest VOD. Returns (m3u8_url, vod_date_YYYY-MM-DD)."""
+def get_latest_vodvod_m3u8(channel_handle: str) -> tuple[str, str, str]:
+    """Scrape vodvod.top for the NEWEST VOD.
+
+    Returns (m3u8_url, vod_date_YYYY-MM-DD, title). Picks by latest date — not DOM
+    order, which vodvod does not reliably sort newest-first (picking the first
+    anchor used to grab an older, already-cached VOD).
+    """
     if sync_playwright is None:
         raise ImportError("playwright is required: pip install playwright && playwright install chromium")
 
@@ -92,13 +97,17 @@ def get_latest_vodvod_m3u8(channel_handle: str) -> tuple[str, str]:
         except Exception:
             pass
 
-        # For each m3u8 anchor: walk up a few parents to capture the surrounding
-        # card HTML, which contains an ISO timestamp like 2026-04-27T22:06:16Z.
+        # Each VOD is its own card: the smallest ancestor of the .m3u8 link that
+        # still contains exactly that one link (climbing stops at the list, which
+        # holds them all). The card text reads "<title>\n<ISO date>\n|\n<dur>...".
         items = page.evaluate("""() => {
             return Array.from(document.querySelectorAll("a[href*='.m3u8']")).map(a => {
-                let p = a;
-                for (let i = 0; i < 8 && p.parentElement; i++) p = p.parentElement;
-                return {href: a.getAttribute('href'), card_html: p.outerHTML};
+                let card = a;
+                while (card.parentElement &&
+                       card.parentElement.querySelectorAll("a[href*='.m3u8']").length === 1) {
+                    card = card.parentElement;
+                }
+                return {href: a.getAttribute('href'), text: (card.innerText || '').trim()};
             });
         }""")
         browser.close()
@@ -106,16 +115,22 @@ def get_latest_vodvod_m3u8(channel_handle: str) -> tuple[str, str]:
     if not items:
         raise ValueError(f"No m3u8 URL found on vodvod.top for channel '{channel_handle}'")
 
-    # Pick first chunked / index.m3u8 (latest VOD)
-    pick = next(
-        (it for it in items if "chunked" in it["href"] or "index.m3u8" in it["href"]),
-        items[0],
-    )
+    def _parse(it: dict) -> dict:
+        text = it.get("text") or ""
+        m = _ISO_DATE_RE.search(text)
+        vid = re.search(r"/m3u8/(\d+)/", it.get("href") or "")
+        return {
+            "href": it.get("href"),
+            "date": m.group(0)[:10] if m else "",
+            "title": text.splitlines()[0].strip() if text else "",
+            "vid": int(vid.group(1)) if vid else 0,
+        }
 
-    iso_match = _ISO_DATE_RE.search(pick["card_html"])
-    vod_date = iso_match.group(0)[:10] if iso_match else _today_iso()
-
-    return pick["href"], vod_date
+    parsed = [_parse(it) for it in items if it.get("href")]
+    # Newest = latest ISO date, then highest VOD id (ids grow over time).
+    best = max(parsed, key=lambda x: (x["date"], x["vid"]))
+    vod_date = best["date"] or _today_iso()
+    return best["href"], vod_date, best["title"]
 
 
 def get_latest_kick_vod_m3u8(channel_slug: str) -> tuple[str, str]:

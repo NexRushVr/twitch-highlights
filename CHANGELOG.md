@@ -6,6 +6,20 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-06-04
+
+### Fixed
+- **vodvod sometimes grabbed an older (already-cached) VOD instead of the newest.**
+  The scraper walked up too many DOM parents and landed on a shared container, so
+  it picked the *first* `.m3u8` link in DOM order — and vodvod isn't reliably
+  newest-first — and read that container's first date. It now reads each VOD's own
+  card and **picks the newest by date** (then highest VOD id), regardless of order.
+
+### Added
+- The **VOD title** (which usually includes the date) is shown when resolving a
+  vodvod source — in the CLI (`Latest VOD: <title> (<date>)`) and the GUI's
+  "Found VOD" line — so you can confirm exactly which stream it grabbed.
+
 ## [1.4.1] - 2026-06-04
 
 ### Fixed

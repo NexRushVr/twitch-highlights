@@ -19,7 +19,7 @@ def _mock_pipeline(tmp_path, sample_segments, sample_clips, video_filename="vide
     clip_file = str(tmp_path / "clips" / "clip_001_funny_reaction.mp4")
 
     with patch("pipeline.download_twitch_vod", return_value=(video_path, vod_date)) as mock_dl, \
-         patch("pipeline.get_latest_vodvod_m3u8", return_value=("https://cdn.example.com/chunked/index.m3u8", vod_date)) as mock_m3u8, \
+         patch("pipeline.get_latest_vodvod_m3u8", return_value=("https://cdn.example.com/chunked/index.m3u8", vod_date, "Test VOD Title")) as mock_m3u8, \
          patch("pipeline.stream_m3u8_to_file", return_value=video_path) as mock_stream, \
          patch("pipeline.resolve_local_file", return_value=(video_path, vod_date)) as mock_local, \
          patch("pipeline.apply_time_window", side_effect=lambda v, *a, **kw: v) as mock_window, \

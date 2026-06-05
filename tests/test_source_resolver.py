@@ -103,7 +103,8 @@ def test_download_twitch_vod_finds_mkv_fallback(tmp_path):
 # ---------------------------------------------------------------------------
 
 def _make_playwright_mock(items):
-    """items: list of dicts {href, card_html} as the scraper's evaluate() returns."""
+    """items: list of dicts {href, text} as the per-card evaluate() returns
+    (text = "<title>\\n<ISO date>\\n|\\n<duration>...")."""
     mock_page = MagicMock()
     mock_browser = MagicMock()
     mock_browser.new_page.return_value = mock_page
@@ -121,40 +122,49 @@ def _make_playwright_mock(items):
     return mock_ctx
 
 
-def test_get_latest_vodvod_m3u8_prefers_chunked():
+def test_get_latest_vodvod_m3u8_picks_newest_by_date_and_returns_title():
     items = [
-        {"href": "https://cdn.example.com/regular/playlist.m3u8", "card_html": "<div>2026-04-26T22:00:00Z</div>"},
-        {"href": "https://cdn.example.com/chunked/index.m3u8",   "card_html": "<div>2026-04-27T22:00:00Z</div>"},
+        {"href": "https://api.vodvod.top/m3u8/100/a/index.m3u8",
+         "text": "Old stream\n2026-04-26T22:00:00Z\n|\n1:00:00"},
+        {"href": "https://api.vodvod.top/m3u8/200/b/index.m3u8",
+         "text": "New stream night\n2026-04-27T22:00:00Z\n|\n2:00:00"},
     ]
     mock_ctx = _make_playwright_mock(items)
 
     with patch("modules.source_resolver.sync_playwright", return_value=mock_ctx):
-        url, date = get_latest_vodvod_m3u8("@testchannel")
+        url, date, title = get_latest_vodvod_m3u8("@testchannel")
 
-    assert "chunked" in url
+    assert "/200/" in url
     assert date == "2026-04-27"
+    assert title == "New stream night"
 
 
-def test_get_latest_vodvod_m3u8_falls_back_to_first():
-    items = [{"href": "https://cdn.example.com/stream/playlist.m3u8", "card_html": "<div>2026-01-15T12:00:00Z</div>"}]
+def test_get_latest_vodvod_m3u8_newest_even_when_older_is_first():
+    """Regression: vodvod's DOM is not reliably newest-first. Picking the first
+    anchor used to grab an older (already-cached) VOD; pick by date instead."""
+    items = [
+        {"href": "https://api.vodvod.top/m3u8/100/a/index.m3u8",
+         "text": "Older\n2026-05-01T10:00:00Z\n|\n3:00:00"},   # first in DOM, but OLD
+        {"href": "https://api.vodvod.top/m3u8/200/b/index.m3u8",
+         "text": "Newer\n2026-05-10T10:00:00Z\n|\n4:00:00"},
+    ]
     mock_ctx = _make_playwright_mock(items)
 
     with patch("modules.source_resolver.sync_playwright", return_value=mock_ctx):
-        url, date = get_latest_vodvod_m3u8("@testchannel")
+        url, date, title = get_latest_vodvod_m3u8("@testchannel")
 
-    assert url == items[0]["href"]
-    assert date == "2026-01-15"
+    assert "/200/" in url and date == "2026-05-10" and title == "Newer"
 
 
 def test_get_latest_vodvod_m3u8_uses_today_when_no_iso_date():
-    items = [{"href": "https://cdn.example.com/chunked/index.m3u8", "card_html": "<div>no date here</div>"}]
+    items = [{"href": "https://api.vodvod.top/m3u8/1/a/index.m3u8", "text": "No date here"}]
     mock_ctx = _make_playwright_mock(items)
 
     with patch("modules.source_resolver.sync_playwright", return_value=mock_ctx):
-        url, date = get_latest_vodvod_m3u8("@testchannel")
+        url, date, title = get_latest_vodvod_m3u8("@testchannel")
 
-    # YYYY-MM-DD shape
     assert len(date) == 10 and date[4] == "-" and date[7] == "-"
+    assert title == "No date here"
 
 
 def test_get_latest_vodvod_m3u8_raises_when_none_found():

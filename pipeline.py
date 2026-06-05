@@ -181,14 +181,16 @@ def run(cfg: dict = None) -> list:
         os.makedirs(cfg["download_dir"], exist_ok=True)
 
         if source == "vodvod":
-            m3u8_url, vod_date = get_latest_vodvod_m3u8(cfg["vodvod_channel"])
+            m3u8_url, vod_date, vod_title = get_latest_vodvod_m3u8(cfg["vodvod_channel"])
+            print(f"    Latest VOD: {vod_title or '(untitled)'}  ({vod_date})")
             if verbose:
-                print(f"    Latest VOD: {vod_date}  m3u8: {m3u8_url}")
+                print(f"    m3u8: {m3u8_url}")
             video_path = os.path.join(cfg["download_dir"], f"{vod_date}.mp4")
             if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
                 print(f"    Using cached video: {video_path}")
             else:
-                progress.sub(f"Found VOD {vod_date} — downloading")
+                progress.sub(f"Found VOD: {vod_title} ({vod_date}) — downloading"
+                             if vod_title else f"Found VOD {vod_date} — downloading")
                 with progress.download_monitor(video_path):
                     stream_m3u8_to_file(m3u8_url, video_path, quiet=quiet)
         elif source == "kick":
