@@ -6,6 +6,20 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.4.3] - 2026-06-05
+
+### Added
+- **Live download progress.** During an m3u8 pull the GUI and CLI now show **% of the
+  VOD** downloaded — taken from the muxed content time over the VOD's known length (an
+  m3u8's total *size* is unknown until the end, so a byte-based % isn't possible) — plus
+  MB, MB/s, and a sustained-rate ETA (`612 MB · 22 MB/s · 43% of VOD (2:11:00 / 5:01:51)
+  · ~6m left`). The GUI's overall bar fills 0→100% during download instead of sitting
+  indeterminate, then switches to the whole-run estimate once processing starts. The VOD
+  length is read from the vodvod card and shown next to the title.
+- Download cache is now named **`<date>-<streamer>.mp4`** so the flat `downloads/` folder
+  can't collide across channels that streamed on the same date. (Clips stay
+  `clips/<streamer>/<date>/`.) First run per channel re-pulls once under the new name.
+
 ## [1.4.2] - 2026-06-04
 
 ### Fixed

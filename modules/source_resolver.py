@@ -2,6 +2,9 @@ import subprocess
 import json
 import os
 import re
+import threading
+import time
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -76,12 +79,32 @@ def download_twitch_vod(url: str, quality: str, out_dir: str, quiet: bool = Fals
 _ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 
 
-def get_latest_vodvod_m3u8(channel_handle: str) -> tuple[str, str, str]:
+def _parse_card_duration(text: str) -> "float | None":
+    """Pull the VOD length (seconds) from a vodvod card's text.
+
+    The card reads "<title>\\n<ISO date>\\n|\\n<H:MM:SS>\\n...": the duration is the
+    first standalone `H:MM:SS` (or `M:SS`) line. The ISO line carries a `T...Z`, so
+    it never full-matches. Returns None when no length line is present.
+    """
+    for line in (ln.strip() for ln in (text or "").splitlines()):
+        m = re.fullmatch(r"(\d{1,2}):([0-5]\d):([0-5]\d)", line)
+        if m:
+            h, mm, ss = (int(x) for x in m.groups())
+            return h * 3600 + mm * 60 + ss
+        m = re.fullmatch(r"(\d{1,2}):([0-5]\d)", line)
+        if m:
+            mm, ss = (int(x) for x in m.groups())
+            return mm * 60 + ss
+    return None
+
+
+def get_latest_vodvod_m3u8(channel_handle: str) -> tuple[str, str, str, "float | None"]:
     """Scrape vodvod.top for the NEWEST VOD.
 
-    Returns (m3u8_url, vod_date_YYYY-MM-DD, title). Picks by latest date — not DOM
-    order, which vodvod does not reliably sort newest-first (picking the first
-    anchor used to grab an older, already-cached VOD).
+    Returns (m3u8_url, vod_date_YYYY-MM-DD, title, duration_seconds). Picks by latest
+    date — not DOM order, which vodvod does not reliably sort newest-first (picking
+    the first anchor used to grab an older, already-cached VOD). duration_seconds is
+    None when the card has no length line.
     """
     if sync_playwright is None:
         raise ImportError("playwright is required: pip install playwright && playwright install chromium")
@@ -124,13 +147,14 @@ def get_latest_vodvod_m3u8(channel_handle: str) -> tuple[str, str, str]:
             "date": m.group(0)[:10] if m else "",
             "title": text.splitlines()[0].strip() if text else "",
             "vid": int(vid.group(1)) if vid else 0,
+            "duration": _parse_card_duration(text),
         }
 
     parsed = [_parse(it) for it in items if it.get("href")]
     # Newest = latest ISO date, then highest VOD id (ids grow over time).
     best = max(parsed, key=lambda x: (x["date"], x["vid"]))
     vod_date = best["date"] or _today_iso()
-    return best["href"], vod_date, best["title"]
+    return best["href"], vod_date, best["title"], best["duration"]
 
 
 def get_latest_kick_vod_m3u8(channel_slug: str) -> tuple[str, str]:
@@ -203,16 +227,19 @@ def resolve_local_file(path: str, download_dir: str, quiet: bool = False) -> tup
     )
 
 
-def stream_m3u8_to_file(m3u8_url: str, out_path: str, quiet: bool = False) -> str:
+def stream_m3u8_to_file(m3u8_url: str, out_path: str, quiet: bool = False,
+                        duration: "float | None" = None, on_progress=None) -> str:
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
-    cmd = [
-        "ffmpeg", "-y",
-        "-i", m3u8_url,
-        "-c", "copy",
-        "-bsf:a", "aac_adtstoasc",
-        out_path,
-    ]
-    _run_ffmpeg(cmd, quiet=quiet)
+    head = ["ffmpeg", "-y"]
+    if on_progress is not None:
+        # Machine-readable progress on stdout; keep stderr quiet+drained so it
+        # can't deadlock during a multi-GB / multi-hour pull.
+        head += ["-loglevel", "warning", "-progress", "pipe:1", "-nostats"]
+    cmd = head + ["-i", m3u8_url, "-c", "copy", "-bsf:a", "aac_adtstoasc", out_path]
+    if on_progress is None:
+        _run_ffmpeg(cmd, quiet=quiet)
+    else:
+        _stream_ffmpeg_with_progress(cmd, duration, on_progress)
     return out_path
 
 
@@ -222,6 +249,68 @@ def _run_ffmpeg(cmd: list, quiet: bool) -> None:
         subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     else:
         subprocess.run(cmd, check=True)
+
+
+def _ffmpeg_seconds(out_time: "str | None") -> "float | None":
+    """Parse ffmpeg's out_time ('HH:MM:SS.micro' or 'N/A') into float seconds."""
+    if not out_time or out_time == "N/A":
+        return None
+    try:
+        return _parse_time_string(out_time)
+    except (ValueError, TypeError):
+        return None
+
+
+def _stream_ffmpeg_with_progress(cmd: list, duration, on_progress) -> None:
+    """Run ffmpeg, parsing its -progress blocks and reporting download position.
+
+    Calls on_progress({out_time, bytes, elapsed, duration}) once per block. ffmpeg
+    emits key=value lines terminated by `progress=continue|end`; `out_time` is the
+    muxed-content timestamp, so out_time/duration is the true fraction of the VOD
+    pulled — bytes alone can't give that, since the total size is unknown until the
+    end. stderr is drained on a thread so a chatty pull can't deadlock the pipe.
+    """
+    proc = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
+    )
+    err_tail: deque = deque(maxlen=40)
+
+    def _drain_err() -> None:
+        for line in proc.stderr:
+            err_tail.append(line.rstrip())
+
+    err_thread = threading.Thread(target=_drain_err, daemon=True)
+    err_thread.start()
+
+    t0 = time.monotonic()
+    cur: dict = {}
+    try:
+        for line in proc.stdout:
+            key, _, val = line.strip().partition("=")
+            if key != "progress":
+                cur[key] = val
+                continue
+            try:
+                size = int(cur.get("total_size"))
+            except (TypeError, ValueError):
+                size = None
+            try:
+                on_progress({
+                    "out_time": _ffmpeg_seconds(cur.get("out_time")),
+                    "bytes": size,
+                    "elapsed": time.monotonic() - t0,
+                    "duration": duration,
+                })
+            except Exception:
+                pass
+            cur = {}
+            if val == "end":
+                break
+    finally:
+        rc = proc.wait()
+        err_thread.join(timeout=1.0)
+    if rc != 0:
+        raise subprocess.CalledProcessError(rc, cmd, stderr="\n".join(err_tail))
 
 
 # ---------------------------------------------------------------------------

@@ -30,6 +30,48 @@ def _streamer_subdir(cfg: dict) -> str:
     return ""
 
 
+def _video_filename(vod_date: str, streamer: str) -> str:
+    """Download cache name. Namespaced as `<date>-<streamer>.mp4` so the flat
+    downloads/ dir can't collide across channels that streamed the same date
+    (plain `<date>.mp4` when there's no streamer, e.g. a raw m3u8 URL)."""
+    return f"{vod_date}-{streamer}.mp4" if streamer else f"{vod_date}.mp4"
+
+
+def _make_download_cb(progress, label: str = "Downloading VOD"):
+    """Build an ffmpeg-progress callback for an m3u8 pull. Reports % of the VOD
+    (content time / known duration), MB downloaded, MB/s, and a sustained-rate
+    ETA — to the GUI feed when one's attached, else a throttled CLI line.
+
+    The total file size of an m3u8 isn't known until the end, so % comes from the
+    muxed timestamp over the VOD's duration; the ETA projects the average rate so
+    far forward ("assuming the average rate is sustained")."""
+    state = {"last_cli": -10.0}
+
+    def cb(info: dict) -> None:
+        downloaded_mb = (info.get("bytes") or 0) / 1e6
+        elapsed = info.get("elapsed") or 0.0
+        out_time = info.get("out_time")
+        duration = info.get("duration")
+        rate = downloaded_mb / elapsed if elapsed > 0 else 0.0
+        frac = None
+        parts = [f"{downloaded_mb:.0f} MB", f"{rate:.1f} MB/s"]
+        if out_time and duration:
+            frac = max(0.0, min(1.0, out_time / duration))
+            parts.append(f"{frac * 100:.0f}% of VOD "
+                         f"({fmt_seconds(out_time)} / {fmt_seconds(duration)})")
+            if frac > 0.02:
+                eta = elapsed * (1.0 - frac) / frac
+                parts.append(f"~{fmt_seconds(eta)} left")
+        detail = " · ".join(parts)
+        if progress.feed_attached:
+            progress.sub(label, fraction=frac, detail=detail)
+        elif elapsed - state["last_cli"] >= 2.0:
+            state["last_cli"] = elapsed
+            print(f"\r    {label}: {detail}          ", end="", flush=True)
+
+    return cb
+
+
 def _today_iso() -> str:
     from datetime import datetime, timezone
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -181,29 +223,35 @@ def run(cfg: dict = None) -> list:
         os.makedirs(cfg["download_dir"], exist_ok=True)
 
         if source == "vodvod":
-            m3u8_url, vod_date, vod_title = get_latest_vodvod_m3u8(cfg["vodvod_channel"])
-            print(f"    Latest VOD: {vod_title or '(untitled)'}  ({vod_date})")
+            m3u8_url, vod_date, vod_title, vod_duration = get_latest_vodvod_m3u8(cfg["vodvod_channel"])
+            length = f", {fmt_seconds(vod_duration)}" if vod_duration else ""
+            print(f"    Latest VOD: {vod_title or '(untitled)'}  ({vod_date}{length})")
             if verbose:
                 print(f"    m3u8: {m3u8_url}")
-            video_path = os.path.join(cfg["download_dir"], f"{vod_date}.mp4")
+            video_path = os.path.join(cfg["download_dir"], _video_filename(vod_date, streamer))
             if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
                 print(f"    Using cached video: {video_path}")
             else:
                 progress.sub(f"Found VOD: {vod_title} ({vod_date}) — downloading"
                              if vod_title else f"Found VOD {vod_date} — downloading")
-                with progress.download_monitor(video_path):
-                    stream_m3u8_to_file(m3u8_url, video_path, quiet=quiet)
+                stream_m3u8_to_file(m3u8_url, video_path, quiet=quiet,
+                                    duration=vod_duration,
+                                    on_progress=_make_download_cb(progress))
+                if not progress.feed_attached:
+                    print()  # close the \r download line
         elif source == "kick":
             m3u8_url, vod_date = get_latest_kick_vod_m3u8(cfg["kick_channel"])
             if verbose:
                 print(f"    Latest VOD: {vod_date}  m3u8: {m3u8_url}")
-            video_path = os.path.join(cfg["download_dir"], f"{vod_date}.mp4")
+            video_path = os.path.join(cfg["download_dir"], _video_filename(vod_date, streamer))
             if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
                 print(f"    Using cached video: {video_path}")
             else:
                 progress.sub(f"Found VOD {vod_date} — downloading")
-                with progress.download_monitor(video_path):
-                    stream_m3u8_to_file(m3u8_url, video_path, quiet=quiet)
+                stream_m3u8_to_file(m3u8_url, video_path, quiet=quiet,
+                                    on_progress=_make_download_cb(progress))
+                if not progress.feed_attached:
+                    print()  # close the \r download line
         elif source == "twitch":
             progress.sub("Found Twitch VOD — downloading")
             with progress.download_monitor(cfg["download_dir"]):

@@ -247,7 +247,16 @@ window.onProgress = function (ev) {
       if (run.estimatedTotal == null && ev.message) {
         $('phaseLabel').textContent = ev.message + '…';
         $('etaLine').textContent = ev.detail ? `${ev.message} — ${ev.detail}` : ev.message;
-        if (ev.detail) $('overallPct').textContent = ev.detail.split('·')[0].trim();  // "234 MB"
+        if (typeof ev.fraction === 'number') {
+          // m3u8 download: fraction = % of the VOD pulled. Make the bar
+          // determinate and track it so the download visibly fills 0→100%.
+          // tick() reclaims the bar for the whole run once set_total arrives.
+          $('overallFill').classList.remove('indeterminate');
+          setBar(ev.fraction);
+          $('overallPct').textContent = Math.round(ev.fraction * 100) + '%';
+        } else if (ev.detail) {
+          $('overallPct').textContent = ev.detail.split('·')[0].trim();  // "234 MB"
+        }
       }
       break;
     case 'avif_progress':

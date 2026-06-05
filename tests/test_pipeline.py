@@ -19,7 +19,7 @@ def _mock_pipeline(tmp_path, sample_segments, sample_clips, video_filename="vide
     clip_file = str(tmp_path / "clips" / "clip_001_funny_reaction.mp4")
 
     with patch("pipeline.download_twitch_vod", return_value=(video_path, vod_date)) as mock_dl, \
-         patch("pipeline.get_latest_vodvod_m3u8", return_value=("https://cdn.example.com/chunked/index.m3u8", vod_date, "Test VOD Title")) as mock_m3u8, \
+         patch("pipeline.get_latest_vodvod_m3u8", return_value=("https://cdn.example.com/chunked/index.m3u8", vod_date, "Test VOD Title", 7200.0)) as mock_m3u8, \
          patch("pipeline.stream_m3u8_to_file", return_value=video_path) as mock_stream, \
          patch("pipeline.resolve_local_file", return_value=(video_path, vod_date)) as mock_local, \
          patch("pipeline.apply_time_window", side_effect=lambda v, *a, **kw: v) as mock_window, \
@@ -969,3 +969,58 @@ def test_arg_parser_keep_vod_flag():
     assert args.keep_vod is False
     args = parser.parse_args(["--keep-vod"])
     assert args.keep_vod is True
+
+
+# ---------------------------------------------------------------------------
+# download progress callback
+# ---------------------------------------------------------------------------
+
+def test_make_download_cb_reports_pct_mb_rate_and_eta():
+    """The m3u8 download callback turns an ffmpeg progress block into a % of the
+    VOD (content time / duration), MB, MB/s, and a sustained-rate ETA."""
+    import pipeline
+
+    class FakeProgress:
+        feed_attached = True
+
+        def __init__(self):
+            self.calls = []
+
+        def sub(self, label, fraction=None, detail=None):
+            self.calls.append((label, fraction, detail))
+
+    prog = FakeProgress()
+    cb = pipeline._make_download_cb(prog, label="Downloading VOD")
+    # 25% of a 2h VOD pulled in 10s, 500 MB so far.
+    cb({"bytes": 500_000_000, "elapsed": 10.0, "out_time": 1800.0, "duration": 7200.0})
+
+    label, fraction, detail = prog.calls[-1]
+    assert label == "Downloading VOD"
+    assert abs(fraction - 0.25) < 1e-6
+    assert "25% of VOD" in detail
+    assert "500 MB" in detail
+    assert "MB/s" in detail
+    assert "left" in detail   # sustained-rate ETA present
+
+
+def test_make_download_cb_without_duration_omits_pct():
+    """No known duration (e.g. a raw m3u8) -> MB + MB/s only, fraction is None."""
+    import pipeline
+
+    class FakeProgress:
+        feed_attached = True
+
+        def __init__(self):
+            self.calls = []
+
+        def sub(self, label, fraction=None, detail=None):
+            self.calls.append((label, fraction, detail))
+
+    prog = FakeProgress()
+    cb = pipeline._make_download_cb(prog)
+    cb({"bytes": 100_000_000, "elapsed": 5.0, "out_time": None, "duration": None})
+
+    _, fraction, detail = prog.calls[-1]
+    assert fraction is None
+    assert "% of VOD" not in detail
+    assert "MB/s" in detail

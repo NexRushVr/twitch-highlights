@@ -132,11 +132,12 @@ def test_get_latest_vodvod_m3u8_picks_newest_by_date_and_returns_title():
     mock_ctx = _make_playwright_mock(items)
 
     with patch("modules.source_resolver.sync_playwright", return_value=mock_ctx):
-        url, date, title = get_latest_vodvod_m3u8("@testchannel")
+        url, date, title, duration = get_latest_vodvod_m3u8("@testchannel")
 
     assert "/200/" in url
     assert date == "2026-04-27"
     assert title == "New stream night"
+    assert duration == 2 * 3600   # "2:00:00" from the winning card
 
 
 def test_get_latest_vodvod_m3u8_newest_even_when_older_is_first():
@@ -151,9 +152,10 @@ def test_get_latest_vodvod_m3u8_newest_even_when_older_is_first():
     mock_ctx = _make_playwright_mock(items)
 
     with patch("modules.source_resolver.sync_playwright", return_value=mock_ctx):
-        url, date, title = get_latest_vodvod_m3u8("@testchannel")
+        url, date, title, duration = get_latest_vodvod_m3u8("@testchannel")
 
     assert "/200/" in url and date == "2026-05-10" and title == "Newer"
+    assert duration == 4 * 3600
 
 
 def test_get_latest_vodvod_m3u8_uses_today_when_no_iso_date():
@@ -161,10 +163,20 @@ def test_get_latest_vodvod_m3u8_uses_today_when_no_iso_date():
     mock_ctx = _make_playwright_mock(items)
 
     with patch("modules.source_resolver.sync_playwright", return_value=mock_ctx):
-        url, date, title = get_latest_vodvod_m3u8("@testchannel")
+        url, date, title, duration = get_latest_vodvod_m3u8("@testchannel")
 
     assert len(date) == 10 and date[4] == "-" and date[7] == "-"
     assert title == "No date here"
+    assert duration is None
+
+
+def test_parse_card_duration_handles_hms_mmss_and_ignores_iso():
+    from modules.source_resolver import _parse_card_duration
+    # Real card shape: title, ISO timestamp (has T...Z), '|', then the length.
+    card = "[18+] TIGER STREAM\n2026-06-04T22:04:30Z\n|\n5:01:51\n819\n|\nmoonbuvr"
+    assert _parse_card_duration(card) == 5 * 3600 + 1 * 60 + 51
+    assert _parse_card_duration("Short\n2026-06-04T22:04:30Z\n|\n45:12") == 45 * 60 + 12
+    assert _parse_card_duration("No length\n2026-06-04T22:04:30Z") is None
 
 
 def test_get_latest_vodvod_m3u8_raises_when_none_found():

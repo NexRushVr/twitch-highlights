@@ -150,6 +150,12 @@ class Progress:
         except OSError:
             return None
 
+    @property
+    def feed_attached(self) -> bool:
+        """True when a GUI is tailing the JSON feed; lets callers fall back to
+        plain stdout for the CLI (where there's no sink to read it)."""
+        return self._sink is not None
+
     def _emit(self, event: dict) -> None:
         """Append one JSON event line to the progress feed, if one is attached.
 
