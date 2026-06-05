@@ -6,6 +6,17 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.4.4] - 2026-06-05
+
+### Fixed
+- **An interrupted download no longer poisons the cache** (runs that "keep failing").
+  A cancelled or killed VOD download left a truncated `.mp4` — an `-c copy` mp4 written
+  straight to the cache name has no moov atom — so every later run reused it and crashed
+  at audio extraction (`moov atom not found`). Downloads now stream to a `<name>.part`
+  file and are **atomically renamed only on success** (a killed process leaves a `.part`,
+  never a valid-looking cache), and a cached video is **re-validated with ffprobe** before
+  reuse — a corrupt/partial cache is re-downloaded instead of failing every run.
+
 ## [1.4.3] - 2026-06-05
 
 ### Added

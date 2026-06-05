@@ -1024,3 +1024,27 @@ def test_make_download_cb_without_duration_omits_pct():
     assert fraction is None
     assert "% of VOD" not in detail
     assert "MB/s" in detail
+
+
+# ---------------------------------------------------------------------------
+# cached-download validation (corrupt/partial cache self-heals)
+# ---------------------------------------------------------------------------
+
+def test_cached_video_ok_rejects_missing_empty_and_unreadable(tmp_path):
+    import pipeline
+
+    assert pipeline._cached_video_ok(str(tmp_path / "nope.mp4")) is False  # missing
+
+    empty = tmp_path / "empty.mp4"
+    empty.write_bytes(b"")
+    assert pipeline._cached_video_ok(str(empty)) is False                  # zero bytes
+
+    corrupt = tmp_path / "corrupt.mp4"
+    corrupt.write_bytes(b"truncated, no moov atom")
+    with patch("pipeline._probe_duration", side_effect=Exception("moov atom not found")):
+        assert pipeline._cached_video_ok(str(corrupt)) is False            # unprobeable
+
+    good = tmp_path / "good.mp4"
+    good.write_bytes(b"x" * 64)
+    with patch("pipeline._probe_duration", return_value=18493.0):
+        assert pipeline._cached_video_ok(str(good)) is True                # valid duration

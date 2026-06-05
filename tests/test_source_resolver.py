@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch, call
@@ -280,23 +281,30 @@ def test_get_latest_kick_vod_m3u8_raises_without_curl_cffi():
 # stream_m3u8_to_file
 # ---------------------------------------------------------------------------
 
+def _fake_ffmpeg_writes_part(cmd, **kwargs):
+    # ffmpeg writes to the .part target (cmd's last arg); mimic a finished file.
+    with open(cmd[-1], "wb") as f:
+        f.write(b"downloaded data")
+    return MagicMock(returncode=0)
+
+
 def test_stream_m3u8_to_file_calls_ffmpeg(tmp_path):
     out = str(tmp_path / "out.mp4")
-    with patch("modules.source_resolver.subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0)
+    with patch("modules.source_resolver.subprocess.run", side_effect=_fake_ffmpeg_writes_part) as mock_run:
         result = stream_m3u8_to_file("https://example.com/stream.m3u8", out)
 
     assert result == out
     cmd = mock_run.call_args[0][0]
     assert "ffmpeg" in cmd
     assert "https://example.com/stream.m3u8" in cmd
-    assert out in cmd
+    assert out + ".part" in cmd            # downloads to .part, renamed on success
+    assert os.path.exists(out)             # atomically moved into place
+    assert not os.path.exists(out + ".part")
 
 
 def test_stream_m3u8_to_file_creates_parent_dir(tmp_path):
     out = str(tmp_path / "nested" / "dir" / "out.mp4")
-    with patch("modules.source_resolver.subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0)
+    with patch("modules.source_resolver.subprocess.run", side_effect=_fake_ffmpeg_writes_part):
         stream_m3u8_to_file("https://example.com/s.m3u8", out)
 
     assert (tmp_path / "nested" / "dir").exists()
@@ -551,3 +559,45 @@ def test_apply_time_window_accepts_bare_seconds(tmp_path):
     trim_cmd = mock_run.call_args_list[1][0][0]
     assert trim_cmd[trim_cmd.index("-ss") + 1] == "60.0"
     assert trim_cmd[trim_cmd.index("-t") + 1] == "60.0"
+
+
+# ---------------------------------------------------------------------------
+# stream_m3u8_to_file — atomic download (.part -> rename)
+# ---------------------------------------------------------------------------
+
+def test_stream_m3u8_atomic_rename_on_success(tmp_path):
+    import modules.source_resolver as sr
+    out = str(tmp_path / "vid.mp4")
+
+    def fake_run(cmd, quiet):
+        part = cmd[-1]
+        assert part.endswith(".part")          # ffmpeg writes to the .part target
+        with open(part, "wb") as f:
+            f.write(b"complete download")
+
+    with patch.object(sr, "_run_ffmpeg", side_effect=fake_run):
+        res = stream_m3u8_to_file("http://x/index.m3u8", out)
+
+    assert res == out
+    assert os.path.exists(out)                 # renamed into place
+    assert not os.path.exists(out + ".part")   # .part consumed
+    with open(out, "rb") as f:
+        assert f.read() == b"complete download"
+
+
+def test_stream_m3u8_removes_part_and_leaves_no_cache_on_failure(tmp_path):
+    """An interrupted download must not leave a valid-named (corrupt) cache."""
+    import modules.source_resolver as sr
+    out = str(tmp_path / "vid.mp4")
+
+    def fake_run(cmd, quiet):
+        with open(cmd[-1], "wb") as f:
+            f.write(b"truncated, no moov atom")   # partial
+        raise subprocess.CalledProcessError(1, cmd)
+
+    with patch.object(sr, "_run_ffmpeg", side_effect=fake_run):
+        with pytest.raises(subprocess.CalledProcessError):
+            stream_m3u8_to_file("http://x/index.m3u8", out)
+
+    assert not os.path.exists(out)             # no corrupt file masquerading as cache
+    assert not os.path.exists(out + ".part")   # partial cleaned up

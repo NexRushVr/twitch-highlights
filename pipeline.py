@@ -30,6 +30,20 @@ def _streamer_subdir(cfg: dict) -> str:
     return ""
 
 
+def _cached_video_ok(path: str) -> bool:
+    """A cached download is reusable only if ffprobe can read a duration from it.
+
+    An interrupted `-c copy` download has no moov atom and would crash audio
+    extraction ("moov atom not found"), so a partial/corrupt cache is treated as a
+    miss and re-downloaded instead of failing every run on the same bad file."""
+    if not (os.path.exists(path) and os.path.getsize(path) > 0):
+        return False
+    try:
+        return _probe_duration(path) > 0
+    except Exception:
+        return False
+
+
 def _video_filename(vod_date: str, streamer: str) -> str:
     """Download cache name. Namespaced as `<date>-<streamer>.mp4` so the flat
     downloads/ dir can't collide across channels that streamed the same date
@@ -229,7 +243,7 @@ def run(cfg: dict = None) -> list:
             if verbose:
                 print(f"    m3u8: {m3u8_url}")
             video_path = os.path.join(cfg["download_dir"], _video_filename(vod_date, streamer))
-            if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
+            if _cached_video_ok(video_path):
                 print(f"    Using cached video: {video_path}")
             else:
                 progress.sub(f"Found VOD: {vod_title} ({vod_date}) — downloading"
@@ -244,7 +258,7 @@ def run(cfg: dict = None) -> list:
             if verbose:
                 print(f"    Latest VOD: {vod_date}  m3u8: {m3u8_url}")
             video_path = os.path.join(cfg["download_dir"], _video_filename(vod_date, streamer))
-            if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
+            if _cached_video_ok(video_path):
                 print(f"    Using cached video: {video_path}")
             else:
                 progress.sub(f"Found VOD {vod_date} — downloading")
@@ -261,7 +275,7 @@ def run(cfg: dict = None) -> list:
         elif source == "m3u8":
             vod_date = _today_iso()
             video_path = os.path.join(cfg["download_dir"], f"{vod_date}.mp4")
-            if not (os.path.exists(video_path) and os.path.getsize(video_path) > 0):
+            if not _cached_video_ok(video_path):
                 progress.sub("Downloading stream")
                 with progress.download_monitor(video_path):
                     stream_m3u8_to_file(cfg["m3u8_url"], video_path, quiet=quiet)

@@ -230,17 +230,36 @@ def resolve_local_file(path: str, download_dir: str, quiet: bool = False) -> tup
 def stream_m3u8_to_file(m3u8_url: str, out_path: str, quiet: bool = False,
                         duration: "float | None" = None, on_progress=None) -> str:
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+    # Download to a .part file and atomically rename on success. An interrupted
+    # `-c copy` mp4 has no moov atom and is unreadable; writing straight to
+    # out_path would leave that corrupt file looking like a valid cache and crash
+    # every later run (audio extraction fails on "moov atom not found"). A killed
+    # process just leaves a .part, which the next download overwrites.
+    part_path = out_path + ".part"
     head = ["ffmpeg", "-y"]
     if on_progress is not None:
         # Machine-readable progress on stdout; keep stderr quiet+drained so it
         # can't deadlock during a multi-GB / multi-hour pull.
         head += ["-loglevel", "warning", "-progress", "pipe:1", "-nostats"]
-    cmd = head + ["-i", m3u8_url, "-c", "copy", "-bsf:a", "aac_adtstoasc", out_path]
-    if on_progress is None:
-        _run_ffmpeg(cmd, quiet=quiet)
-    else:
-        _stream_ffmpeg_with_progress(cmd, duration, on_progress)
+    cmd = head + ["-i", m3u8_url, "-c", "copy", "-bsf:a", "aac_adtstoasc", part_path]
+    try:
+        if on_progress is None:
+            _run_ffmpeg(cmd, quiet=quiet)
+        else:
+            _stream_ffmpeg_with_progress(cmd, duration, on_progress)
+    except BaseException:
+        _quiet_remove(part_path)
+        raise
+    os.replace(part_path, out_path)
     return out_path
+
+
+def _quiet_remove(path: str) -> None:
+    """Best-effort delete; never raises (used in cleanup paths)."""
+    try:
+        os.remove(path)
+    except OSError:
+        pass
 
 
 def _run_ffmpeg(cmd: list, quiet: bool) -> None:
