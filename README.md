@@ -6,7 +6,7 @@
 
 Local, GPU-accelerated highlight extractor for Twitch / Kick VODs and raw m3u8 streams.
 
-**What you get:** vertical, CapCut-style captioned short clips (`*_captioned.mp4`) plus the horizontal source cuts, ready to upload to TikTok / Shorts / Reels. Everything runs on your own machine — no cloud APIs required if you use Ollama.
+**What you get:** horizontal (1920x1080) highlight cuts plus CapCut-style captioned versions (`*_captioned.mp4`) with word-by-word "karaoke" captions, ready to upload. Each clip can also carry ready-to-post metadata (hook, title, hashtags, a virality estimate) in the manifest. Everything runs on your own machine — no cloud APIs required if you use Ollama. (Vertical 9:16 reframing is on the roadmap, not yet implemented.)
 
 **Two ways to pick clips:**
 - **AI picks** (`--clip-mode all`) — a local LLM reads the transcript and picks the funniest / most hype moments for you.

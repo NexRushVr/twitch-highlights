@@ -114,6 +114,17 @@ def _coerce_clip(c) -> dict | None:
         "score": float(c["score"]) if isinstance(c.get("score"), (int, float)) else 0.5,
         "description": str(c.get("description", "")),
     }
+    # Optional short-form metadata — carried through to the manifest when present.
+    for k in ("hook", "title"):
+        v = c.get(k)
+        if isinstance(v, str) and v.strip():
+            out[k] = v.strip()
+    if isinstance(c.get("hashtags"), list):
+        tags = [str(h).strip().lstrip("#") for h in c["hashtags"] if str(h).strip()]
+        if tags:
+            out["hashtags"] = tags[:8]
+    if isinstance(c.get("virality"), (int, float)):
+        out["virality"] = round(float(c["virality"]), 1)
     return out
 
 
@@ -135,10 +146,19 @@ def _parse_clips_from_response(raw: str) -> list:
     return [c for c in (_coerce_clip(x) for x in candidates) if c is not None]
 
 
+_METADATA_PROMPT = (
+    "For each clip also include, when you can: \"hook\" (a punchy 3-8 word opener "
+    "for a short), \"title\" (a catchy clip title), \"hashtags\" (3-5 relevant tags, "
+    "no # needed), and \"virality\" (0-100 estimate of how shareable the moment is). "
+    "These are optional — never drop a clip because you're unsure of them."
+)
+
+
 def _build_system_prompt(config: dict) -> str:
     base = SYSTEM_BASE.replace("{max_clips}", str(config.get("max_clips", 10)))
     addendum = CLIP_MODE_PROMPTS.get(config.get("clip_mode", "all"), "")
-    return f"{base}\n\n{addendum}".strip()
+    extra = _METADATA_PROMPT if config.get("clip_metadata", True) else ""
+    return f"{base}\n\n{addendum}\n\n{extra}".strip()
 
 
 # JSON schema for the clip list, passed to Ollama's `format` param so the model
@@ -158,6 +178,11 @@ _CLIP_LIST_SCHEMA = {
             "reason": {"type": "string"},
             "score": {"type": "number"},
             "description": {"type": "string"},
+            # Ready-to-post short-form metadata (optional; surfaced in the manifest).
+            "hook": {"type": "string"},        # attention-grabbing opening line
+            "title": {"type": "string"},       # punchy clip title
+            "hashtags": {"type": "array", "items": {"type": "string"}},
+            "virality": {"type": "number"},    # 0-100 shareability estimate
         },
         "required": ["start", "end", "reason", "score", "description"],
     },

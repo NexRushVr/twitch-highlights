@@ -219,3 +219,41 @@ def test_caption_clip_writes_ass_and_calls_burn(tmp_path):
     assert "hello" in content
     assert "[Script Info]" in content
     mock_burn.assert_called_once_with(in_path, out_path, ass_path, quiet=False)
+
+
+# ---------------------------------------------------------------------------
+# Word-level karaoke captions
+# ---------------------------------------------------------------------------
+
+def _word_seg():
+    # one segment spanning 100-104s with 4 word timings
+    return [{
+        "start": 100.0, "end": 104.0, "text": "this is so funny",
+        "words": [
+            {"word": "this", "start": 100.0, "end": 100.5},
+            {"word": "is", "start": 100.5, "end": 101.0},
+            {"word": "so", "start": 101.0, "end": 102.0},
+            {"word": "funny", "start": 102.0, "end": 104.0},
+        ],
+    }]
+
+
+def test_build_ass_karaoke_uses_word_tags_and_style():
+    out = build_ass(_word_seg(), clip_start=101.0, clip_end=103.0, padding=2.0, style="karaoke")
+    assert "Style: Karaoke" in out          # header carries the karaoke style
+    assert ",Karaoke,," in out              # dialogue uses it
+    assert r"\k" in out                     # karaoke fill tags present
+    assert "funny" in out
+
+
+def test_build_ass_simple_style_ignores_words():
+    out = build_ass(_word_seg(), clip_start=101.0, clip_end=103.0, padding=2.0, style="simple")
+    assert r"\k" not in out                 # no karaoke
+    assert ",CapCut,," in out               # falls back to the segment style
+
+
+def test_build_ass_falls_back_when_no_words():
+    # segments without word timings -> classic CapCut cues even in karaoke mode
+    segs = [{"start": 100.0, "end": 103.0, "text": "no word timings here"}]
+    out = build_ass(segs, clip_start=100.0, clip_end=103.0, padding=1.0, style="karaoke")
+    assert r"\k" not in out and ",CapCut,," in out

@@ -432,8 +432,11 @@ def run(cfg: dict = None) -> list:
                 segments = json.load(f)
             print(f"    Using cached transcript: {len(segments)} segments")
         else:
+            want_words = (cfg.get("burn_subtitles", True)
+                          and cfg.get("caption_style", "karaoke") != "simple")
             segments = transcribe(
-                wav_path, cfg["whisper_model"], cfg["whisper_device"], verbose=verbose
+                wav_path, cfg["whisper_model"], cfg["whisper_device"], verbose=verbose,
+                word_timestamps=want_words,
             )
             with open(transcript_path, "w", encoding="utf-8") as f:
                 json.dump(segments, f)
@@ -515,6 +518,7 @@ def run(cfg: dict = None) -> list:
                     caption_clip(
                         item["file"], captioned, segments,
                         meta["start"], meta["end"], padding, quiet=quiet,
+                        style=cfg.get("caption_style", "karaoke"),
                     )
                     item["captioned"] = captioned
                 except Exception as e:

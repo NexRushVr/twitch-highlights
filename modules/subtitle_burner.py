@@ -18,10 +18,13 @@ WrapStyle: 0
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: CapCut,Impact,80,&H0000FFFF,&H0000FFFF,&H00000000,&H64000000,1,0,0,0,100,100,0,0,1,7,3,2,120,120,150,1
+Style: Karaoke,Impact,80,&H0000FFFF,&H00FFFFFF,&H00000000,&H64000000,1,0,0,0,100,100,0,0,1,7,3,2,120,120,150,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
+# Karaoke style: words start white (SecondaryColour) and pop yellow (PrimaryColour)
+# as they're spoken, via {\k} fills — the modern word-by-word caption look.
 
 
 def _format_ass_time(t: float) -> str:
@@ -67,18 +70,75 @@ def _split_long_segment(start: float, end: float, text: str, max_chunk_s: float 
     return chunks
 
 
-def build_ass(segments: list, clip_start: float, clip_end: float, padding: float) -> str:
+def _karaoke_lines(words: list, words_per_line: int = 5) -> list[str]:
+    """Group word-timed cues into short lines and emit one karaoke Dialogue per
+    line: each word is a `{\\k<cs>}word` run that fills (pops) as it's spoken."""
+    lines: list[str] = []
+    for i in range(0, len(words), words_per_line):
+        group = words[i:i + words_per_line]
+        if not group:
+            continue
+        line_start = group[0][0]
+        line_end = group[-1][1]
+        parts = []
+        prev_end = line_start
+        for w_start, w_end, w_text in group:
+            # A small lead-gap before the word also fills, keeping timing honest.
+            gap_cs = max(0, int(round((w_start - prev_end) * 100)))
+            dur_cs = max(1, int(round((w_end - w_start) * 100)))
+            if gap_cs:
+                parts.append(f"{{\\k{gap_cs}}}")
+            parts.append(f"{{\\k{dur_cs}}}{_escape_ass_text(w_text)} ")
+            prev_end = w_end
+        lines.append(
+            f"Dialogue: 0,{_format_ass_time(line_start)},{_format_ass_time(line_end)},"
+            f"Karaoke,,0,0,0,,{''.join(parts).rstrip()}"
+        )
+    return lines
+
+
+def build_ass(segments: list, clip_start: float, clip_end: float, padding: float,
+              style: str = "karaoke") -> str:
     """Build a CapCut-style ASS subtitle file for a single clip.
 
     Caller already extracted clip = source[clip_start - padding : clip_end + padding].
     The clip's local timeline starts at zero, so segments need to be re-timed by
     subtracting (clip_start - padding).
+
+    When `style != "simple"` and Whisper word timestamps are present, captions are
+    word-by-word "karaoke" (each word pops as spoken); otherwise they fall back to
+    evenly-split segment cues.
     """
     extract_start = max(0.0, clip_start - padding)
     extract_end = clip_end + padding
     clip_duration = extract_end - extract_start
 
+    # Collect in-window words (re-timed to the clip) for karaoke, if available.
+    karaoke_words: list[tuple[float, float, str]] = []
+    have_words = False
+    if style != "simple":
+        for seg in segments:
+            for w in (seg.get("words") or []):
+                have_words = True
+                try:
+                    ws = float(w["start"]); we = float(w["end"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if we <= extract_start or ws >= extract_end:
+                    continue
+                ls = max(0.0, ws - extract_start)
+                le = min(we - extract_start, clip_duration)
+                wt = (w.get("word") or "").strip()
+                if le > ls and wt:
+                    karaoke_words.append((ls, le, wt))
+
     lines = [ASS_HEADER]
+    if have_words and karaoke_words:
+        karaoke_words.sort(key=lambda x: x[0])
+        lines.extend(_karaoke_lines(karaoke_words))
+        return "\n".join(lines) + "\n"
+
+    # Fallback: segment-level cues with even time-splitting.
     for seg in segments:
         seg_start = float(seg["start"])
         seg_end = float(seg["end"])
@@ -130,10 +190,11 @@ def caption_clip(
     clip_end: float,
     padding: float,
     quiet: bool = False,
+    style: str = "karaoke",
 ) -> str:
     """End-to-end: build ASS for the clip's transcript window, burn it in. Returns output path."""
     ass_path = os.path.splitext(output_video)[0] + ".ass"
-    ass_text = build_ass(segments, clip_start, clip_end, padding)
+    ass_text = build_ass(segments, clip_start, clip_end, padding, style=style)
     with open(ass_path, "w", encoding="utf-8") as f:
         f.write(ass_text)
     burn_captions(input_video, output_video, ass_path, quiet=quiet)

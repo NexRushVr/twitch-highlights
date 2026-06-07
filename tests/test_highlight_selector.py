@@ -431,3 +431,27 @@ def test_select_highlights_routes_to_phrase_mode_without_llm():
     mock_llm.assert_not_called()
     assert len(clips) == 1
     assert clips[0]["reason"] == "clip_it"
+
+
+# ---------------------------------------------------------------------------
+# short-form metadata passthrough (hook / title / hashtags / virality)
+# ---------------------------------------------------------------------------
+
+def test_coerce_clip_carries_shortform_metadata():
+    from modules.highlight_selector import _coerce_clip
+    c = _coerce_clip({
+        "start": 10, "end": 20, "reason": "funny", "score": 0.8,
+        "description": "d", "hook": "You won't believe this",
+        "title": "Insane play", "hashtags": ["#gaming", "clip", ""],
+        "virality": 87,
+    })
+    assert c["hook"] == "You won't believe this"
+    assert c["title"] == "Insane play"
+    assert c["hashtags"] == ["gaming", "clip"]   # '#' stripped, blanks dropped
+    assert c["virality"] == 87.0
+
+
+def test_coerce_clip_without_metadata_is_unchanged():
+    from modules.highlight_selector import _coerce_clip
+    c = _coerce_clip({"start": 1, "end": 2, "reason": "r", "score": 0.5, "description": "d"})
+    assert "hook" not in c and "title" not in c and "hashtags" not in c and "virality" not in c

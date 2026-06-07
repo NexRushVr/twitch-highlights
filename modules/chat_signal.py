@@ -276,10 +276,18 @@ def fetch_twitch_vod_chat(video_id, *, max_messages: int = 0,
 
 
 def twitch_video_id(twitch_vod_url: str):
-    """Extract the numeric video id from a twitch.tv/videos/<id> URL (or bare id)."""
+    """Extract the numeric video id from a Twitch VOD/highlight URL or bare id.
+
+    Handles `twitch.tv/videos/<id>`, highlight forms `twitch.tv/<chan>/v/<id>` and
+    `/video/<id>`, and a bare `<id>` / `v<id>`. Clip slugs (clips.twitch.tv/<slug>)
+    have no numeric id and return None."""
     if not twitch_vod_url:
         return None
-    m = re.search(r"(?:videos/|^v?)(\d{6,})", str(twitch_vod_url))
+    s = str(twitch_vod_url).strip()
+    m = re.search(r"/(?:videos?|v)/(\d{6,})", s)   # URL forms (videos/, video/, v/)
+    if m:
+        return m.group(1)
+    m = re.fullmatch(r"v?(\d{6,})", s)             # bare id or v<id>
     return m.group(1) if m else None
 
 

@@ -51,9 +51,11 @@ Other sources: `--source-type twitch --url <twitch.tv/videos/...>`,
 `--source-type vodvod --channel "@handle"`, `--source-type local --path <file.mp4>`.
 Discover every flag with `.\.venv\Scripts\python.exe pipeline.py --help`.
 
-Output: `clips/<streamer>/<vod_date>/` — both horizontal cuts and
-`*_vertical.mp4` / captioned variants. Re-running the same VOD/date is a cached
-no-op; pass `--force` to redo it.
+Output: `clips/<streamer>/<vod_date>/` — horizontal cuts plus `*_captioned.mp4`
+(burned word-by-word "karaoke" captions by default; set `caption_style: "simple"`
+for the older even-split style). Clips are 1920x1080 horizontal — there is no
+vertical/9:16 reframe yet. Re-running the same VOD/date is a cached no-op; pass
+`--force` to redo it.
 
 ## Configure (edit `config.json`, created by the installer)
 Key knobs: `ollama_model` (e.g. `gpt-oss:20b` best, `qwen2.5:14b` lighter),

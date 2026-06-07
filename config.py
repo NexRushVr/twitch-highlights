@@ -110,6 +110,11 @@ DEFAULT_CONFIG = {
     # when the manifest skip-guard fires (nothing new was produced).
     "cleanup_source": True,
 
+    # Captions — "karaoke" burns word-by-word cues that pop as spoken (needs
+    # Whisper word timestamps, captured automatically); "simple" is the older
+    # evenly-split segment style.
+    "caption_style": "karaoke",
+
     # Display
     "verbose": False,                 # show full subprocess / per-chunk log spam
 

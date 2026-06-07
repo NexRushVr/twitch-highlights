@@ -81,6 +81,11 @@ def test_twitch_video_id_parses_url_and_bare():
     assert cs.twitch_video_id("v2790261388") == "2790261388"
     assert cs.twitch_video_id("2790261388") == "2790261388"
     assert cs.twitch_video_id("") is None
+    # highlight URL forms
+    assert cs.twitch_video_id("https://www.twitch.tv/somechan/v/2790261388") == "2790261388"
+    assert cs.twitch_video_id("https://www.twitch.tv/somechan/video/2790261388") == "2790261388"
+    # a clip slug has no numeric id
+    assert cs.twitch_video_id("https://clips.twitch.tv/SomeFunnyClipSlug") is None
 
 
 def test_parse_iso_handles_kick_and_iso():

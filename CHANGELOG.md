@@ -6,6 +6,24 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-06-07
+
+### Added
+- **Word-by-word "karaoke" captions** (default). Whisper word timestamps now drive
+  ASS `{\k}` cues so each word pops as it's spoken — the modern short-form look —
+  instead of evenly-split segment cues. `caption_style: "simple"` restores the old
+  style. Falls back automatically when word timings aren't available.
+- **Ready-to-post clip metadata.** The LLM selection pass can now also emit, per
+  clip, a `hook`, `title`, `hashtags`, and a `virality` (0–100) estimate, carried
+  through to the manifest. Optional — a clip is never dropped for lacking them.
+- **Robust Twitch URL parsing**: handles highlight URLs (`twitch.tv/<chan>/v/<id>`,
+  `/video/<id>`) and bare ids, not just `twitch.tv/videos/<id>`.
+
+### Fixed
+- README/CLAUDE.md no longer claim `*_vertical.mp4` / vertical output — clips are
+  1920x1080 horizontal; a 9:16 reframe is roadmap, not implemented. (Surfaced by a
+  multi-agent review of the codebase vs. the docs.)
+
 ## [1.5.0] - 2026-06-07
 
 ### Added
