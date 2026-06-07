@@ -460,7 +460,8 @@ Env-var example: `VOD_CLIP_OLLAMA_MODEL=llama3.1:8b`, `VOD_CLIP_WHISPER_DEVICE=c
 | Key | Default | Notes |
 | --- | --- | --- |
 | `source_type` | `twitch` | `twitch` \| `vodvod` \| `kick` \| `m3u8` \| `local` |
-| `clip_mode` | `reaction` | `reaction` \| `dance` \| `hype` \| `all` \| `phrase` |
+| `clip_mode` | `reaction` | `reaction` \| `dance` \| `hype` \| `all` \| `phrase` \| `music` |
+| `caption_style` | `karaoke` | `karaoke` (word-by-word pop) \| `simple` (even-split segment cues) |
 | `trigger_phrase` | `clip it` | phrase that marks a clip when `clip_mode=phrase` (case-insensitive) |
 | `phrase_pre_seconds` | `60` | seconds of context before the trigger phrase |
 | `phrase_post_seconds` | `60` | seconds of context after the trigger phrase |
@@ -496,6 +497,30 @@ Env-var example: `VOD_CLIP_OLLAMA_MODEL=llama3.1:8b`, `VOD_CLIP_WHISPER_DEVICE=c
 | `max_clip_duration` | `45` | seconds |
 | `clip_padding_seconds` | `3` | head/tail padding around the LLM's chosen window |
 | `output_dir` | `./clips` | where `<streamer>/<vod_date>/` lands |
+| `clip_metadata` | `true` | ask the LLM for per-clip `hook`/`title`/`hashtags`/`virality` (saved in the manifest) |
+
+</details>
+
+<details>
+<summary><b>Chat-signal settings</b> (Twitch / Kick only)</summary>
+
+The chat-replay highlight signal fetches a VOD's chat and uses message-velocity /
+hype-emote spikes as clip candidates + a score boost. Works for Twitch VODs still
+up and Kick; unavailable for vodvod (those VODs aren't on Twitch) — it falls back
+to audio+LLM automatically.
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| `use_chat_signal` | `true` | fetch chat + detect spikes when the source supports it (`--no-chat` to disable) |
+| `chat_gate` | `false` | only run the LLM on transcript near chat spikes — faster on long VODs (`--chat-gate`) |
+| `chat_bucket_seconds` | `5.0` | velocity bucket width |
+| `chat_spike_z` | `2.5` | z-score over baseline to call a spike |
+| `chat_spike_min_messages` | `5` | min raw messages in a bucket to qualify |
+| `chat_pre_seconds` / `chat_post_seconds` | `6.0` | padding before / after a spike window |
+| `chat_score_boost` | `0.15` | score bump for a clip overlapping a chat spike |
+| `chat_add_candidates` | `true` | fold chat spikes in as their own clip candidates |
+| `chat_max_messages` | `0` | cap chat fetched per VOD (`0` = unlimited) |
+| `chat_gate_pad_seconds` | `15.0` | window padding when `chat_gate` is on |
 
 </details>
 

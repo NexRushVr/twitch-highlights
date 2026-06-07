@@ -115,11 +115,9 @@ def build_ass(segments: list, clip_start: float, clip_end: float, padding: float
 
     # Collect in-window words (re-timed to the clip) for karaoke, if available.
     karaoke_words: list[tuple[float, float, str]] = []
-    have_words = False
     if style != "simple":
         for seg in segments:
             for w in (seg.get("words") or []):
-                have_words = True
                 try:
                     ws = float(w["start"]); we = float(w["end"])
                 except (KeyError, TypeError, ValueError):
@@ -133,7 +131,7 @@ def build_ass(segments: list, clip_start: float, clip_end: float, padding: float
                     karaoke_words.append((ls, le, wt))
 
     lines = [ASS_HEADER]
-    if have_words and karaoke_words:
+    if karaoke_words:
         karaoke_words.sort(key=lambda x: x[0])
         lines.extend(_karaoke_lines(karaoke_words))
         return "\n".join(lines) + "\n"
@@ -162,8 +160,10 @@ def build_ass(segments: list, clip_start: float, clip_end: float, padding: float
 def burn_captions(input_video: str, output_video: str, ass_path: str, quiet: bool = False) -> str:
     """Burn an ASS subtitle file into a video via ffmpeg."""
     # ffmpeg's vf parser uses ':' as a separator, so Windows drive letters need escaping.
-    # Single quote the path for the filter, then escape ':' inside it.
-    ass_arg = ass_path.replace("\\", "/").replace(":", "\\:")
+    # Single quote the path for the filter, then escape ':' inside it. Also escape any
+    # single quote in the path (e.g. a clip name with an apostrophe) so it doesn't end
+    # the quoted filter argument and break the parse.
+    ass_arg = ass_path.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
     cmd = [
         "ffmpeg", "-y",
         "-i", input_video,

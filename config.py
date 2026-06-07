@@ -114,6 +114,8 @@ DEFAULT_CONFIG = {
     # Whisper word timestamps, captured automatically); "simple" is the older
     # evenly-split segment style.
     "caption_style": "karaoke",
+    # Ask the LLM for ready-to-post per-clip metadata (hook/title/hashtags/virality).
+    "clip_metadata": True,
 
     # Display
     "verbose": False,                 # show full subprocess / per-chunk log spam
@@ -151,12 +153,24 @@ def load_config(path: str = None) -> dict:
         env_key = f"VOD_CLIP_{key.upper()}"
         if env_key in os.environ:
             val = os.environ[env_key]
-            if isinstance(default_val, bool):
-                val = val.lower() in ("1", "true", "yes")
-            elif isinstance(default_val, int):
-                val = int(val)
-            elif isinstance(default_val, float):
-                val = float(val)
+            try:
+                if isinstance(default_val, bool):
+                    val = val.lower() in ("1", "true", "yes")
+                elif isinstance(default_val, int):
+                    val = int(val)
+                elif isinstance(default_val, float):
+                    val = float(val)
+            except ValueError as e:
+                raise ValueError(
+                    f"Invalid value for {env_key}: {val!r} "
+                    f"(expected {type(default_val).__name__})"
+                ) from e
             cfg[key] = val
+
+    style = cfg.get("caption_style", "karaoke")
+    if style not in ("karaoke", "simple"):
+        raise ValueError(
+            f"caption_style must be 'karaoke' or 'simple', got {style!r}"
+        )
 
     return cfg

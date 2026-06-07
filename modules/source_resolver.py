@@ -164,7 +164,7 @@ def get_latest_kick_vod_m3u8(channel_slug: str) -> tuple[str, str]:
     We use curl_cffi with browser impersonation to get past it.
     """
     if _curl_requests is None:
-        raise ImportError("curl_cffi is required: pip install 'curl_cffi>=0.10,<0.15'")
+        raise ImportError("curl_cffi is required: pip install 'curl_cffi>=0.15.0,<0.16'")
 
     slug = channel_slug.lstrip("@")
     api_url = f"https://kick.com/api/v2/channels/{slug}/videos"

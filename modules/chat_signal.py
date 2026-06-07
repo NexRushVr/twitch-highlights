@@ -181,8 +181,10 @@ def boost_clips_with_chat(clips: list, spikes: list, config: dict) -> list:
     for clip in clips:
         cs, ce = clip.get("start", 0.0), clip.get("end", 0.0)
         for sp in spikes:
-            peak = sp.get("_peak", (sp["start"] + sp["end"]) / 2)
-            if cs <= peak <= ce or (sp["start"] <= cs <= sp["end"]):
+            # Proper interval overlap — the old peak/start-only check missed
+            # spike-end-in-clip and spike-contains-clip, so earned boosts were
+            # silently skipped.
+            if cs < sp["end"] and sp["start"] < ce:
                 clip["score"] = min(1.0, clip.get("score", 0.0) + boost)
                 break
     return clips
@@ -210,18 +212,28 @@ _TWITCH_CLIENT_ID = "kd1unb4b3q4t58fwlpcbzcbnm76a8fp"
 _VIDEO_COMMENTS_HASH = "b70a3591ff0f4e0313d126c6a1502d79a1c02baebb288227c582044aa76adf6a"
 
 
+def _json_or_unavailable(r, url: str):
+    """Parse a response as JSON, or raise ChatUnavailable. A Cloudflare challenge
+    or HTML error page returns HTTP 200 with non-JSON; treat that as a graceful
+    fallback, not a crash."""
+    try:
+        return r.json()
+    except ValueError as e:
+        raise ChatUnavailable(f"invalid JSON from {url}: {e}")
+
+
 def _post_json(url: str, headers: dict, body, timeout: int = 25):
     r = _rq.post(url, headers=headers, json=body, timeout=timeout, **_IMPERSONATE)
     if r.status_code != 200:
         raise ChatUnavailable(f"{url} returned HTTP {r.status_code}")
-    return r.json()
+    return _json_or_unavailable(r, url)
 
 
 def _get_json(url: str, timeout: int = 25):
     r = _rq.get(url, timeout=timeout, **_IMPERSONATE)
     if r.status_code != 200:
         raise ChatUnavailable(f"{url} returned HTTP {r.status_code}")
-    return r.json()
+    return _json_or_unavailable(r, url)
 
 
 def fetch_twitch_vod_chat(video_id, *, max_messages: int = 0,
@@ -257,11 +269,13 @@ def fetch_twitch_vod_chat(video_id, *, max_messages: int = 0,
         for e in edges:
             node = e.get("node") or {}
             off = node.get("contentOffsetSeconds")
-            if off is None:
-                continue
+            try:
+                off = float(off)
+            except (TypeError, ValueError):
+                continue   # skip a bad row, don't sink the whole chat fetch
             frags = (node.get("message") or {}).get("fragments") or []
             text = "".join((f.get("text") or "") for f in frags)
-            messages.append(ChatMessage(float(off), text, message_weight(text)))
+            messages.append(ChatMessage(off, text, message_weight(text)))
         if on_progress and messages:
             on_progress(len(messages), messages[-1].offset)
         if max_messages and len(messages) >= max_messages:
@@ -360,7 +374,10 @@ def fetch_kick_vod_chat(channel_id, start_epoch: float, duration_seconds: float,
             ca = m.get("created_at")
             if not ca:
                 continue
-            ce = _parse_iso(ca)
+            try:
+                ce = _parse_iso(ca)
+            except (ValueError, TypeError):
+                continue   # one malformed timestamp shouldn't abort the replay
             oldest = ce if oldest is None else min(oldest, ce)
             off = ce - start_epoch
             if -2.0 <= off <= duration_seconds + 5.0:

@@ -100,3 +100,35 @@ def test_load_config_env_takes_precedence_over_file(tmp_path, monkeypatch):
 
     cfg = load_config(str(config_file))
     assert cfg["max_clips"] == 42
+
+
+# ---------------------------------------------------------------------------
+# validation added by the 10-lens review
+# ---------------------------------------------------------------------------
+
+def test_invalid_caption_style_raises():
+    with pytest.raises(ValueError, match="caption_style"):
+        load_config_with({"caption_style": "karake"})
+
+
+def test_bad_env_override_raises_clear_error(monkeypatch):
+    monkeypatch.setenv("VOD_CLIP_CHAT_BUCKET_SECONDS", "not-a-number")
+    with pytest.raises(ValueError, match="VOD_CLIP_CHAT_BUCKET_SECONDS"):
+        load_config()
+
+
+def test_clip_metadata_is_registered_default():
+    # so the env-override loop + docs/example pick it up
+    assert DEFAULT_CONFIG.get("clip_metadata") is True
+
+
+def load_config_with(overrides, tmp_path=None):
+    """Write overrides to a temp config and load it (helper for validation tests)."""
+    import json, tempfile, os
+    fd, path = tempfile.mkstemp(suffix=".json")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(overrides, f)
+    try:
+        return load_config(path)
+    finally:
+        os.remove(path)

@@ -124,7 +124,7 @@ def _coerce_clip(c) -> dict | None:
         if tags:
             out["hashtags"] = tags[:8]
     if isinstance(c.get("virality"), (int, float)):
-        out["virality"] = round(float(c["virality"]), 1)
+        out["virality"] = round(max(0.0, min(100.0, float(c["virality"]))), 1)
     return out
 
 
@@ -440,6 +440,7 @@ def select_highlights(segments: list, config: dict, wav_path: str | None = None,
         # not silently swallowed.
         iterable = enumerate(progress.iter(chunks, total=len(chunks), desc="LLM chunks"), start=1)
 
+    failures = 0
     for i, chunk in iterable:
         chunk_text = "\n".join(
             f"[{s['start']:.1f}s - {s['end']:.1f}s] {s['text']}"
@@ -450,12 +451,19 @@ def select_highlights(segments: list, config: dict, wav_path: str | None = None,
         try:
             raw = _call_llm(system_prompt, chunk_text, config)
         except Exception as e:
+            failures += 1
             print(f"    LLM chunk {i} failed: {type(e).__name__}: {e}", flush=True)
             continue
         parsed = _parse_clips_from_response(raw)
         if verbose:
             print(f"    LLM chunk {i}/{len(chunks)} -> {len(parsed)} candidates", flush=True)
         all_clips.extend(parsed)
+
+    # Distinguish "the model found nothing" from "every call errored" — the latter
+    # (model down, bad key) would otherwise look identical to an empty result.
+    if chunks and failures == len(chunks):
+        print(f"    WARNING: all {len(chunks)} LLM chunks failed — check the LLM "
+              f"backend/model; falling back to audio/chat signals only.", flush=True)
 
     all_clips.sort(key=lambda x: x.get("score", 0), reverse=True)
     return deduplicate_clips(all_clips)

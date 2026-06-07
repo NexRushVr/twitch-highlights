@@ -6,6 +6,38 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-06-07
+
+A multi-agent (10-lens) code review of the new code; these are the fixes it
+flagged as worth doing.
+
+### Fixed
+- **Chat score boost missed valid overlaps.** `boost_clips_with_chat` only caught
+  spike-peak-in-clip / spike-start-in-clip, silently skipping spike-end-in-clip and
+  spike-contains-clip — now uses a proper interval-overlap test, so clips actually
+  get the chat boost they earned.
+- **Chat must degrade gracefully — now it does.** A malformed Kick `created_at`, a
+  non-numeric Twitch `contentOffsetSeconds`, or a non-JSON (Cloudflare/HTML) reply
+  no longer crashes the run; the bad row is skipped or the fetch falls back to
+  audio+LLM, as intended.
+- **BOM-safe JSON reads.** The clips manifest and transcript are read with
+  `utf-8-sig`, matching the rest of the codebase — a hand-edited (BOM-prefixed) file
+  no longer forces a spurious full re-run or crashes.
+- **Clearer config errors.** A malformed `VOD_CLIP_*` env value now raises a precise
+  message instead of an opaque traceback; `caption_style` is validated (`karaoke` |
+  `simple`).
+- ffmpeg caption burn escapes single quotes in the subtitle path (clip names with
+  apostrophes no longer break the burn).
+- `curl_cffi` install hint matches requirements.txt (`>=0.15.0,<0.16`).
+- LLM virality is clamped to 0–100.
+
+### Added / Docs
+- `config.example.json` regenerated from defaults (was missing ~33 keys, incl. all
+  `chat_*` and `caption_style`); README config reference gains a Chat-signal section,
+  `caption_style`, the `music` clip mode, and `clip_metadata` (now a registered key).
+- Warn when **every** LLM chunk fails (distinguishes "model is down" from
+  "found nothing").
+
 ## [1.6.0] - 2026-06-07
 
 ### Added

@@ -65,6 +65,32 @@ def test_boost_clips_with_chat_bumps_overlap():
     assert clips[1]["score"] == pytest.approx(0.5)   # no overlap
 
 
+def test_boost_clips_with_chat_interval_overlap_cases():
+    """Regression: the old peak/start-only check missed spike-end-in-clip and
+    spike-fully-contains-clip; proper interval overlap must catch both."""
+    cfg = {"chat_score_boost": 0.2}
+    # spike END falls inside the clip (spike starts before, ends inside)
+    c1 = [{"start": 100.0, "end": 120.0, "score": 0.5}]
+    cs.boost_clips_with_chat(c1, [{"start": 90.0, "end": 105.0}], cfg)
+    assert c1[0]["score"] == pytest.approx(0.7)
+    # spike fully CONTAINS the clip (peak may be outside the clip window)
+    c2 = [{"start": 100.0, "end": 110.0, "score": 0.5}]
+    cs.boost_clips_with_chat(c2, [{"start": 80.0, "end": 200.0, "_peak": 180.0}], cfg)
+    assert c2[0]["score"] == pytest.approx(0.7)
+    # genuinely disjoint -> no boost
+    c3 = [{"start": 100.0, "end": 110.0, "score": 0.5}]
+    cs.boost_clips_with_chat(c3, [{"start": 200.0, "end": 210.0}], cfg)
+    assert c3[0]["score"] == pytest.approx(0.5)
+
+
+def test_json_or_unavailable_raises_chatunavailable_on_html():
+    class _Resp:
+        def json(self):
+            raise ValueError("Expecting value")
+    with pytest.raises(ChatUnavailable, match="invalid JSON"):
+        cs._json_or_unavailable(_Resp(), "https://x/y")
+
+
 def test_spike_windows_merges_close_windows():
     spikes = [{"start": 10.0, "end": 20.0}, {"start": 25.0, "end": 30.0},
               {"start": 200.0, "end": 210.0}]
