@@ -84,6 +84,10 @@ def build_phase_plan(cfg: dict, factors: dict) -> list:
     included with factor 0 — its time is measured, not estimated ahead."""
     plan = [
         ("source", 0.0),
+    ]
+    if cfg.get("_chat_enabled"):
+        plan.append(("chat", 0.0))   # measured like source, not estimated ahead
+    plan += [
         ("audio", factors["audio"]),
         ("transcribe", factors["transcribe"]),
         ("llm", factors["llm"]),

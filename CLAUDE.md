@@ -82,6 +82,12 @@ Full table is in `README.md` under "Config reference".
 - "Make AVIFs under N MB" -> add `--avif-target <MB>` (e.g. `--avif-target 10`, or
   pick a size in the GUI's AVIF-target dropdown). Produces one
   `<streamer>-<rand>-<N>mb.avif` aimed under that size (AvifTools `-TargetSizeMB`).
+- "Use chat to find highlights" -> automatic on Twitch (VOD still up) + Kick: the
+  pipeline fetches the VOD chat replay and uses message-velocity / hype-emote
+  spikes (`modules/chat_signal.py`) as clip candidates + a score boost. Disable
+  with `--no-chat`; add `--chat-gate` to only LLM-score transcript near chat
+  spikes (faster on long VODs). Not available for vodvod (those VODs aren't on
+  Twitch, so there's no chat) or local files — it silently falls back to audio+LLM.
 
 Note: clip files are named `<streamer>-<adjective>-<noun>.mp4` (Docker-style, e.g.
 `abehamm-sneaky-otter.mp4`), not `clip_NNN_<reason>.mp4`. The reason/score are in

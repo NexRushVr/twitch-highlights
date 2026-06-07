@@ -84,6 +84,25 @@ DEFAULT_CONFIG = {
     "avif_min_width": 480,            # target-mode resolution floor (px)
     "avif_min_fps": 24,               # target-mode frame-rate floor
 
+    # Chat signal — use the VOD's chat replay (Twitch GraphQL / Kick API) as a
+    # cheap, crowd-sourced highlight cue. Velocity + hype-emote spikes become clip
+    # candidates and a score boost. Only works for Twitch VODs still up + Kick;
+    # any failure falls back to the audio+LLM flow. vodvod is unsupported (its IDs
+    # aren't Twitch video IDs and those VODs are usually gone from Twitch).
+    "use_chat_signal": True,          # fetch chat + detect spikes when supported
+    "chat_bucket_seconds": 5.0,       # velocity bucket width
+    "chat_spike_z": 2.5,              # z-score over baseline to call a spike
+    "chat_spike_min_messages": 5,     # min raw msgs in a bucket to qualify
+    "chat_pre_seconds": 6.0,          # padding before a spike window
+    "chat_post_seconds": 6.0,         # padding after a spike window
+    "chat_elevated_fraction": 0.5,    # envelope cut (× std) for density boundaries
+    "chat_score_boost": 0.15,         # bump for a clip overlapping a chat spike
+    "chat_add_candidates": True,      # fold chat spikes in as their own candidates
+    "chat_max_candidates": 0,         # 0 = max_clips × 3
+    "chat_max_messages": 0,           # 0 = unlimited (cap very long VODs if needed)
+    "chat_gate": False,               # Phase 3: only LLM-score transcript near spikes
+    "chat_gate_pad_seconds": 15.0,    # window padding when gating the LLM
+
     # Disk cleanup — after a successful run, delete the downloaded VOD, any
     # windowed trim, and the derived WAV to reclaim multi-GB of space. The
     # transcript JSON is kept (it's small and lets re-runs skip Whisper if you

@@ -6,6 +6,29 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-06-07
+
+### Added
+- **Chat-velocity highlight signal** (`modules/chat_signal.py`). Fetches a VOD's
+  chat *replay* and uses message velocity + hype-emote spikes — a cheap,
+  crowd-sourced highlight cue with no GPU/LLM cost — as clip candidates and a
+  score boost.
+  - **Twitch**: GraphQL `VideoCommentsByOffsetOrCursor` (anonymous client-id,
+    cursor pagination), the same mechanism lay295/TwitchDownloader uses. Works
+    only while the VOD is still up on Twitch.
+  - **Kick**: `/api/v2/channels/<id>/messages` replay (seek by `start_time`, page
+    backward by `cursor`, `created_at`→offset) via the existing `curl_cffi` client.
+  - **vodvod is unsupported** — its IDs aren't Twitch video IDs and those VODs are
+    usually gone from Twitch, so there's no chat to fetch; the run falls back to
+    the audio+LLM flow automatically (as does any deleted VOD / network failure).
+  - **Hype-weighted velocity**: messages flooded with `OMEGALUL`/`Pog`/`KEKW`/
+    `clip it`/`+2` etc. count for more than generic chatter; spike clip bounds
+    follow the chat density envelope rather than a fixed window.
+  - **LLM gating** (`--chat-gate`): only run the LLM on transcript near chat spikes
+    — cuts the dominant LLM cost on long VODs. On by config, off by default.
+  - Flags `--no-chat` / `--chat-gate`; GUI toggles in the run form; `chat_*` config
+    keys. Adds a "Fetching chat replay" phase (Twitch/Kick full runs only).
+
 ## [1.4.4] - 2026-06-05
 
 ### Fixed

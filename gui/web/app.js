@@ -107,6 +107,8 @@ function gatherOpts() {
     clip_mode: mode,
     force: $('forceChk').checked,
     verbose: $('verboseChk').checked,
+    no_chat: $('noChatChk').checked,
+    chat_gate: $('chatGateChk').checked,
     start_time: $('startTime').value,
     end_time: $('endTime').value,
   };

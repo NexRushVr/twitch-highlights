@@ -15,7 +15,14 @@ from modules.source_resolver import (
 )
 from modules.audio_extractor import extract_audio, get_audio_peaks
 from modules.transcriber import transcribe
-from modules.highlight_selector import select_highlights, top_up_with_music_peaks
+from modules.highlight_selector import select_highlights, top_up_with_music_peaks, deduplicate_clips
+from modules.chat_signal import (
+    fetch_chat_for_source,
+    detect_chat_spikes,
+    boost_clips_with_chat,
+    spike_windows,
+    ChatUnavailable,
+)
 from modules.clip_extractor import batch_extract
 from modules.subtitle_burner import caption_clip
 from modules.progress import DEFAULT_PHASE_WEIGHTS, Progress, fmt_seconds
@@ -28,6 +35,16 @@ def _streamer_subdir(cfg: dict) -> str:
     if cfg["source_type"] == "kick":
         return cfg.get("kick_channel", "").lstrip("@")
     return ""
+
+
+def _segment_in_windows(seg: dict, windows: list) -> bool:
+    """True if a transcript segment overlaps any [start, end] window (chat gating)."""
+    try:
+        s = float(seg["start"])
+        e = float(seg["end"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return any(s < b and e > a for (a, b) in windows)
 
 
 def _cached_video_ok(path: str) -> bool:
@@ -226,7 +243,17 @@ def run(cfg: dict = None) -> list:
 
     verbose = bool(cfg.get("verbose", False))
     quiet = not verbose
+    # Chat-signal is available only for Twitch (VOD still up) and Kick, and only
+    # on a full run (a time-window trim means we can't line chat up to the cut).
+    chat_enabled = (
+        cfg.get("use_chat_signal", True)
+        and cfg.get("source_type") in ("twitch", "kick")
+        and not (cfg.get("start_time") or cfg.get("end_time"))
+    )
+    cfg["_chat_enabled"] = chat_enabled
     weights = dict(DEFAULT_PHASE_WEIGHTS)
+    if chat_enabled:
+        weights["chat"] = 0.03   # inserts a "Fetching chat replay" phase after source
     if cfg.get("avif_export"):
         weights["avif"] = 0.04   # adds an 8th phase to the overall-% display
     progress = Progress(verbose=verbose, weights=weights)
@@ -371,6 +398,25 @@ def run(cfg: dict = None) -> list:
     wav_path = derived_base + ".wav"
     transcript_path = os.path.splitext(wav_path)[0] + ".transcript.json"
 
+    # Chat signal: fetch the VOD's chat replay (Twitch/Kick) and find velocity
+    # spikes — a cheap, crowd-sourced highlight cue. Purely additive: any failure
+    # (deleted VOD, unsupported source, network) falls back to audio+LLM.
+    chat_spikes: list = []
+    if chat_enabled:
+        with progress.phase("chat", "Fetching chat replay", spinner=False):
+            try:
+                def _chat_progress(n, off):
+                    progress.sub("Fetching chat replay",
+                                 detail=f"{n} msgs · {fmt_seconds(off)}")
+                messages = fetch_chat_for_source(cfg, on_progress=_chat_progress)
+                chat_dur = run_duration or (max((m.offset for m in messages), default=0.0) + 5)
+                chat_spikes = detect_chat_spikes(messages, chat_dur, cfg)
+                print(f"    {len(messages)} chat msgs → {len(chat_spikes)} spike windows")
+            except ChatUnavailable as e:
+                print(f"    Chat signal unavailable ({e}) — using audio+LLM only")
+            except Exception as e:  # never let chat sink a run
+                print(f"    Chat signal error ({type(e).__name__}: {e}) — skipping")
+
     # Step 2: Extract audio
     with progress.phase("audio", "Extracting audio"):
         if os.path.exists(wav_path) and os.path.getsize(wav_path) > 0:
@@ -403,17 +449,35 @@ def run(cfg: dict = None) -> list:
     else:
         sel_label = "LLM highlight selection"
     with progress.phase("llm", sel_label, spinner=False):
-        clips = select_highlights(segments, cfg, wav_path=wav_path, progress=progress)
+        sel_segments = segments
+        # Phase 3 — chat gating: when enabled, only feed the LLM the transcript
+        # around chat spikes (hype is sparse), cutting the dominant LLM cost.
+        if cfg.get("chat_gate") and chat_spikes and cfg.get("clip_mode") not in ("phrase", "music"):
+            windows = spike_windows(chat_spikes, pad=float(cfg.get("chat_gate_pad_seconds", 15.0)))
+            gated = [s for s in segments if _segment_in_windows(s, windows)]
+            if gated:
+                print(f"    Chat-gating LLM: {len(gated)}/{len(segments)} segments "
+                      f"in {len(windows)} spike windows")
+                sel_segments = gated
+        clips = select_highlights(sel_segments, cfg, wav_path=wav_path, progress=progress)
         if verbose:
             print(f"    {len(clips)} clip candidates identified")
 
-    # Step 5: Audio peak cross-reference + min_clips top-up
+    # Step 5: Audio peak + chat cross-reference + min_clips top-up
     with progress.phase("peaks", "Cross-referencing audio peaks"):
         peaks = get_audio_peaks(wav_path)
         for clip in clips:
             for peak in peaks:
                 if peak["start"] <= clip["start"] <= peak["end"]:
                     clip["score"] = min(1.0, clip.get("score", 0) + 0.1)
+        # Phase 2 — chat cross-reference: boost clips that land on a chat spike,
+        # then fold the chat-spike windows in as their own candidates so they
+        # compete for the final slots (deduped against existing clips).
+        if chat_spikes and cfg.get("clip_mode") not in ("phrase",):
+            boost_clips_with_chat(clips, chat_spikes, cfg)
+            if cfg.get("chat_add_candidates", True):
+                extra = [{k: v for k, v in c.items() if not k.startswith("_")} for c in chat_spikes]
+                clips = deduplicate_clips(clips + extra)
         clips.sort(key=lambda x: x.get("score", 0), reverse=True)
         # Phrase mode is "catch every time I said the trigger" — don't truncate
         # or top up; the whole point is fidelity to the streamer's marks.
@@ -537,6 +601,10 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--avif-target", type=float,
                    help="Target AVIF size in MB — one <streamer>-<rand>-<N>mb.avif per "
                         "clip (auto bitrate + downscale) instead of the quality not/opt pair")
+    p.add_argument("--no-chat", dest="no_chat", action="store_true",
+                   help="Disable the chat-replay highlight signal (Twitch/Kick)")
+    p.add_argument("--chat-gate", dest="chat_gate", action="store_true",
+                   help="Only run the LLM on transcript near chat spikes (faster on long VODs)")
     return p
 
 
@@ -594,5 +662,9 @@ if __name__ == "__main__":
     if args.avif_target is not None:
         cfg["avif_export"] = True
         cfg["avif_target_mb"] = args.avif_target
+    if args.no_chat:
+        cfg["use_chat_signal"] = False
+    if args.chat_gate:
+        cfg["chat_gate"] = True
 
     run(cfg)

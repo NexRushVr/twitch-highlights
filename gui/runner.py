@@ -106,6 +106,11 @@ def build_args(opts: dict) -> tuple[list[str], str | None]:
         tmb = opts.get("avif_target_mb")
         if tmb:
             args += ["--avif-target", str(tmb)]
+    # Chat-signal (Twitch/Kick): on by default; expose the disable + gate toggles.
+    if opts.get("no_chat"):
+        args += ["--no-chat"]
+    if opts.get("chat_gate"):
+        args += ["--chat-gate"]
 
     # Use the installer-tuned config when present (run.ps1 does the same).
     if os.path.isfile(config_path()):
