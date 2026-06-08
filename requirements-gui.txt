@@ -3,7 +3,7 @@
 #
 # pywebview's Windows backend additionally pulls pythonnet + clr-loader (to talk
 # to the Edge WebView2 runtime, which ships with Windows 11).
-pywebview>=5.0
+pywebview>=6.2.1
 
 # --- build only (packaging the .exe; not needed to run from source) ---
 # Installed on demand by build_gui.ps1:
