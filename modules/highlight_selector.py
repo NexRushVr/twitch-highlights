@@ -194,6 +194,11 @@ def _call_ollama(system_prompt: str, user_message: str, config: dict) -> str:
         raise ImportError("ollama is required: pip install ollama")
     timeout = config.get("llm_timeout_seconds", 300)
     client = ollama.Client(timeout=timeout)
+    # Cap the context window: our transcript chunks are ~6000 chars, so the model's
+    # default (e.g. 32K for qwen2.5) just bloats VRAM — at 32K a 14B model needs
+    # ~15 GB and spills to CPU on a 16 GB card. 8192 fits a chunk + schema output
+    # with margin and keeps the model fully on-GPU.
+    num_ctx = int(config.get("ollama_num_ctx", 8192) or 8192)
     return _with_retries(lambda: client.chat(
         model=config["ollama_model"],
         messages=[
@@ -201,6 +206,7 @@ def _call_ollama(system_prompt: str, user_message: str, config: dict) -> str:
             {"role": "user", "content": f"Transcript:\n{user_message}"},
         ],
         format=_CLIP_LIST_SCHEMA,
+        options={"num_ctx": num_ctx},
     )["message"]["content"])
 
 

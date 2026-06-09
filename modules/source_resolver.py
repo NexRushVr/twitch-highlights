@@ -227,6 +227,12 @@ def resolve_local_file(path: str, download_dir: str, quiet: bool = False) -> tup
     )
 
 
+# ffmpeg muxer names by container extension — needed when the on-disk name is a
+# `.part` file, whose extension can't tell ffmpeg which muxer to use.
+_MUXER_FOR_EXT = {".mp4": "mp4", ".mkv": "matroska", ".ts": "mpegts",
+                  ".mov": "mov", ".m4a": "mp4", ".webm": "webm"}
+
+
 def stream_m3u8_to_file(m3u8_url: str, out_path: str, quiet: bool = False,
                         duration: "float | None" = None, on_progress=None) -> str:
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
@@ -241,7 +247,11 @@ def stream_m3u8_to_file(m3u8_url: str, out_path: str, quiet: bool = False,
         # Machine-readable progress on stdout; keep stderr quiet+drained so it
         # can't deadlock during a multi-GB / multi-hour pull.
         head += ["-loglevel", "warning", "-progress", "pipe:1", "-nostats"]
-    cmd = head + ["-i", m3u8_url, "-c", "copy", "-bsf:a", "aac_adtstoasc", part_path]
+    # The output is a .part file, so ffmpeg can't infer the muxer from the
+    # extension — force it from out_path's real extension (mp4 for our downloads).
+    fmt = _MUXER_FOR_EXT.get(os.path.splitext(out_path)[1].lower(), "mp4")
+    cmd = head + ["-i", m3u8_url, "-c", "copy", "-bsf:a", "aac_adtstoasc",
+                  "-f", fmt, part_path]
     try:
         if on_progress is None:
             _run_ffmpeg(cmd, quiet=quiet)

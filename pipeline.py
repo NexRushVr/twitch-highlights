@@ -613,6 +613,17 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 
 if __name__ == "__main__":
+    # Force UTF-8 on stdout/stderr. Stream titles, transcript text, and chat carry
+    # emoji / non-cp1252 characters (e.g. "♡"), which crash a print when output is
+    # redirected to a file or pipe on Windows (default cp1252). The GUI sets this
+    # via PYTHONIOENCODING; this covers plain CLI use and `> log` redirection too.
+    import sys
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
     parser = _build_arg_parser()
     args = parser.parse_args()
 

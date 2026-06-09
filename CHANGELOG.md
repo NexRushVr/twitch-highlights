@@ -6,6 +6,26 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.6.2] - 2026-06-09
+
+### Fixed
+- **m3u8 downloads were broken since v1.4.4** (vodvod / Kick / raw m3u8). The atomic
+  `.part` download writes to `<name>.mp4.part`, but ffmpeg picks its muxer from the
+  file extension and can't handle `.part` (*"Unable to choose an output format"*) —
+  every download failed with EINVAL before a single byte landed. Now forces the
+  muxer (`-f mp4`) for the `.part` output. The v1.4.4 tests mocked ffmpeg so they
+  never caught it; added an assertion that the format flag is present.
+- **Ollama spilled to CPU and timed out after transcription on a shared GPU.** The
+  pipeline shares one GPU with the Ollama server; Whisper's VRAM wasn't released
+  before the LLM phase, so a 14B model (~15 GB at its 32K default context) couldn't
+  co-fit on a 16 GB card and spilled to CPU → 300 s per-chunk timeouts. Now (a) frees
+  Whisper's CUDA memory after transcribing and (b) caps Ollama's context to 8192
+  (`ollama_num_ctx`), dropping the model from ~15 GB to ~10 GB so it stays fully
+  on-GPU. (A cached-transcript run skipped Whisper, which is why it "worked locally".)
+- **UnicodeEncodeError on stream titles containing emoji** (e.g. "♡") when stdout is
+  redirected on Windows (cp1252 default). `pipeline.py` now forces UTF-8 on
+  stdout/stderr, matching what the GUI already sets via `PYTHONIOENCODING`.
+
 ## [1.6.1] - 2026-06-07
 
 A multi-agent (10-lens) code review of the new code; these are the fixes it

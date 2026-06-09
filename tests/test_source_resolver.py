@@ -298,6 +298,10 @@ def test_stream_m3u8_to_file_calls_ffmpeg(tmp_path):
     assert "ffmpeg" in cmd
     assert "https://example.com/stream.m3u8" in cmd
     assert out + ".part" in cmd            # downloads to .part, renamed on success
+    # The .part extension can't tell ffmpeg the muxer, so the format must be forced
+    # (regression: without `-f mp4` ffmpeg errors "Unable to choose an output format").
+    assert "-f" in cmd and cmd[cmd.index("-f") + 1] == "mp4"
+    assert cmd.index("-f") < cmd.index(out + ".part")   # -f applies to the output
     assert os.path.exists(out)             # atomically moved into place
     assert not os.path.exists(out + ".part")
 

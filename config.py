@@ -116,6 +116,10 @@ DEFAULT_CONFIG = {
     "caption_style": "karaoke",
     # Ask the LLM for ready-to-post per-clip metadata (hook/title/hashtags/virality).
     "clip_metadata": True,
+    # Ollama context window. Our transcript chunks are ~6000 chars, so the model's
+    # large default (e.g. 32K) only bloats VRAM and makes a 14B model spill to CPU
+    # on a 16 GB GPU. 8192 fits a chunk + structured output with room to spare.
+    "ollama_num_ctx": 8192,
 
     # Display
     "verbose": False,                 # show full subprocess / per-chunk log spam
