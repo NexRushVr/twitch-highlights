@@ -177,3 +177,14 @@ def test_fetch_kick_vod_chat_walks_back_to_start():
 def test_fetch_chat_for_source_rejects_vodvod():
     with pytest.raises(ChatUnavailable, match="vodvod"):
         cs.fetch_chat_for_source({"source_type": "vodvod"})
+
+
+def test_fetchers_degrade_without_http_client():
+    """The module must import + pure functions work even when neither curl_cffi nor
+    requests is installed (CI's minimal deps); fetchers then raise the handled
+    ChatUnavailable instead of crashing collection on import."""
+    with patch.object(cs, "_rq", None):
+        with pytest.raises(ChatUnavailable, match="HTTP client"):
+            cs._post_json("https://x", {}, [{}])
+        with pytest.raises(ChatUnavailable, match="HTTP client"):
+            cs._get_json("https://x")

@@ -24,9 +24,13 @@ from datetime import datetime, timezone
 try:  # curl_cffi gets past Kick's Cloudflare and works fine for Twitch too
     from curl_cffi import requests as _rq
     _IMPERSONATE = {"impersonate": "chrome"}
-except Exception:  # pragma: no cover - fallback when curl_cffi absent
-    import requests as _rq
-    _IMPERSONATE = {}
+except ImportError:
+    try:  # plain requests is a fine fallback for Twitch (Kick needs curl_cffi)
+        import requests as _rq
+        _IMPERSONATE = {}
+    except ImportError:  # neither installed (e.g. CI's minimal test deps) — the
+        _rq = None       # pure functions still import; fetchers raise ChatUnavailable
+        _IMPERSONATE = {}
 
 
 # A single chat line anchored to its position in the VOD.
@@ -223,6 +227,8 @@ def _json_or_unavailable(r, url: str):
 
 
 def _post_json(url: str, headers: dict, body, timeout: int = 25):
+    if _rq is None:
+        raise ChatUnavailable("no HTTP client (install curl_cffi or requests)")
     r = _rq.post(url, headers=headers, json=body, timeout=timeout, **_IMPERSONATE)
     if r.status_code != 200:
         raise ChatUnavailable(f"{url} returned HTTP {r.status_code}")
@@ -230,6 +236,8 @@ def _post_json(url: str, headers: dict, body, timeout: int = 25):
 
 
 def _get_json(url: str, timeout: int = 25):
+    if _rq is None:
+        raise ChatUnavailable("no HTTP client (install curl_cffi or requests)")
     r = _rq.get(url, timeout=timeout, **_IMPERSONATE)
     if r.status_code != 200:
         raise ChatUnavailable(f"{url} returned HTTP {r.status_code}")
